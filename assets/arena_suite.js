@@ -5008,7 +5008,7 @@ const gachaUi = (() => {
     const barCss=`:host{all:initial;position:fixed;left:0;right:0;bottom:0;z-index:30;height:${BAR_H}px;display:block;font:400 11px/1 var(--font-basel-grotesk,var(--font-inter,system-ui)),'PingFang SC','Microsoft YaHei',sans-serif;
 --bg:hsl(var(--surface-primary,36 45% 98%));--raised:hsl(var(--surface-tertiary,33 31% 94%));--line:hsl(var(--border-faint,30 5% 90%));--fg:hsl(var(--text-primary,24 6% 17%));--muted:hsl(var(--text-tertiary,35 6% 42%));--good:hsl(var(--interactive-positive,125 49% 38%));--warn:hsl(var(--syntax-yellow,40 92% 38%));--bad:#c2410c;color:var(--fg)}
 :host([hidden]){display:none!important}:host([data-collapsed]){left:auto;right:8px;bottom:6px;height:auto}
-.bar{box-sizing:border-box;height:${BAR_H}px;display:flex;align-items:center;gap:0;padding:0 8px 0 80px;background:var(--bg);border-top:1px solid var(--line);white-space:nowrap;overflow:hidden}
+.bar{box-sizing:border-box;height:${BAR_H}px;display:flex;align-items:center;gap:0;padding:0 8px 0 24px;background:var(--bg);border-top:1px solid var(--line);white-space:nowrap;overflow:hidden}
 .items{display:flex;align-items:center;min-width:0;flex:1;overflow:hidden;gap:0}
 .it{display:inline-flex;align-items:center;gap:4px;padding:0 9px;height:${BAR_H}px;border-left:1px solid var(--line);color:var(--muted);cursor:default;flex:none}
 .it:first-child{border-left:0;padding-left:0}.it b{font-weight:500;color:var(--fg);font-variant-numeric:tabular-nums}
