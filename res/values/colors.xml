@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_light_bg">#FFFFFF</color>
+    <color name="ic_light_emblem">#242422</color>
+    <color name="ic_dark_bg">#111113</color>
+    <color name="ic_dark_emblem">#FFFFFF</color>
+    <color name="theme_bg">#FFFFFF</color>
+</resources>

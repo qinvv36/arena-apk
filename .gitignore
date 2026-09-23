@@ -1,0 +1,4 @@
+build/
+*.keystore
+test*
+*.py
