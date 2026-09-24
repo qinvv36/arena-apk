@@ -37,9 +37,16 @@ import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
 
 import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class MainActivity extends Activity implements OnBackInvokedCallback, View.OnApplyWindowInsetsListener, View.OnTouchListener, Runnable {
 
@@ -58,8 +65,8 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         boolean isNight = isSystemNightMode();
         checkAndSyncLauncherIcon(isNight);
 
-        // Load userscript from assets
-        suiteScript = loadAssetScript("arena_suite.js");
+        // Load userscript (prioritizes hot-updated script in filesDir over APK assets)
+        suiteScript = loadCurrentScript();
 
         // Root container
         FrameLayout rootLayout = new FrameLayout(this);
@@ -282,6 +289,38 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         }
     }
 
+    public static class ReloadRunnable implements Runnable {
+        private final WebView webView;
+
+        public ReloadRunnable(WebView webView) {
+            this.webView = webView;
+        }
+
+        @Override
+        public void run() {
+            if (webView != null) {
+                webView.reload();
+            }
+        }
+    }
+
+    public static class DownloaderRunnable implements Runnable {
+        private final MainActivity activity;
+        private final String urlStr;
+
+        public DownloaderRunnable(MainActivity activity, String urlStr) {
+            this.activity = activity;
+            this.urlStr = urlStr;
+        }
+
+        @Override
+        public void run() {
+            if (activity != null) {
+                activity.downloadWorker(urlStr);
+            }
+        }
+    }
+
     public static class AndroidBridge {
         private final MainActivity activity;
 
@@ -293,6 +332,20 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         public void requestInputFocus() {
             if (activity != null) {
                 activity.runOnUiThread(activity);
+            }
+        }
+
+        @JavascriptInterface
+        public void applyHotUpdate(String code) {
+            if (activity != null) {
+                activity.applyHotUpdate(code);
+            }
+        }
+
+        @JavascriptInterface
+        public void performHotUpdate(String url) {
+            if (activity != null) {
+                activity.downloadAndApplyScript(url);
             }
         }
     }
@@ -316,6 +369,35 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         }
 
         private void tryInject(WebView view, String url) {
+            // 0. Intercept userscript update downloads in web page context
+            String updateHook = "javascript:(function(){" +
+                    "if(window.__arena_update_hook__)return;" +
+                    "window.__arena_update_hook__=true;" +
+                    "var origOpen=window.open;" +
+                    "window.open=function(u,t,f){" +
+                    "  if(u&&typeof u==='string'&&u.indexOf('Arena-Native-Suite.user.js')!==-1){" +
+                    "    if(window.AndroidBridge&&window.AndroidBridge.performHotUpdate){" +
+                    "      (async function(){" +
+                    "        try{" +
+                    "          var resp=await(window.__ampNativeFetch||fetch)(u,{cache:'no-store'});" +
+                    "          if(resp.ok){" +
+                    "            var text=await resp.text();" +
+                    "            if(text&&text.length>5000){" +
+                    "              window.AndroidBridge.applyHotUpdate(text);" +
+                    "              return;" +
+                    "            }" +
+                    "          }" +
+                    "        }catch(e){}" +
+                    "        window.AndroidBridge.performHotUpdate(u);" +
+                    "      })();" +
+                    "      return null;" +
+                    "    }" +
+                    "  }" +
+                    "  return origOpen?origOpen.apply(this,arguments):null;" +
+                    "};" +
+                    "})();";
+            view.evaluateJavascript(updateHook, null);
+
             // 1. Universal input focus & soft keyboard handshake fix (all pages & SPA navigation)
             String inputFix = "javascript:(function(){" +
                     "if(window.__arena_input_focus_fix_installed__)return;" +
@@ -374,9 +456,10 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                         "}})();";
                 view.evaluateJavascript(cssFix, null);
 
-                // 4. Inject userscript
-                if (suiteScript != null && !suiteScript.isEmpty()) {
-                    view.evaluateJavascript(suiteScript, null);
+                // 4. Inject userscript (dynamically reads updated script from activity.suiteScript)
+                String scriptToInject = activity != null ? activity.suiteScript : suiteScript;
+                if (scriptToInject != null && !scriptToInject.isEmpty()) {
+                    view.evaluateJavascript(scriptToInject, null);
                 }
             }
         }
@@ -395,6 +478,15 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
 
         @Override
         public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+            if (request != null && request.getUrl() != null) {
+                String u = request.getUrl().toString();
+                if (u.contains("Arena-Native-Suite.user.js")) {
+                    if (activity != null) {
+                        activity.downloadAndApplyScript(u);
+                    }
+                    return true;
+                }
+            }
             return false;
         }
     }
@@ -493,6 +585,13 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         @Override
         public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
             String u = request.getUrl().toString();
+            if (u.contains("Arena-Native-Suite.user.js")) {
+                dialog.dismiss();
+                if (activity != null) {
+                    activity.downloadAndApplyScript(u);
+                }
+                return true;
+            }
             if (u.contains("arena.ai") && !u.contains("accounts.google.com") && !u.contains("oauth")) {
                 dialog.dismiss();
                 activity.webView.loadUrl(u);
@@ -500,6 +599,136 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
             }
             return false;
         }
+    }
+
+    public void downloadAndApplyScript(String urlStr) {
+        new Thread(new DownloaderRunnable(this, urlStr)).start();
+    }
+
+    public void downloadWorker(String urlStr) {
+        try {
+            String fetchUrl = urlStr;
+            if (!fetchUrl.contains("?t=") && !fetchUrl.contains("&t=")) {
+                fetchUrl += (fetchUrl.contains("?") ? "&" : "?") + "t=" + System.currentTimeMillis();
+            }
+            URL url = new URL(fetchUrl);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(20000);
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14)");
+            conn.setRequestProperty("Cache-Control", "no-cache");
+            conn.connect();
+            if (conn.getResponseCode() == 200) {
+                try (InputStream is = conn.getInputStream();
+                     BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+                    StringBuilder sb = new StringBuilder();
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        sb.append(line).append("\n");
+                    }
+                    applyHotUpdate(sb.toString());
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    public void applyHotUpdate(String code) {
+        if (code == null || code.length() < 5000) {
+            return;
+        }
+        if (!code.contains("Arena") && !code.contains("UserScript") && !code.contains("mergedArenaTools")) {
+            return;
+        }
+        try {
+            String patched = patchMobileSafeMargin(code);
+            File targetFile = new File(getFilesDir(), "arena_suite_latest.js");
+            File tempFile = new File(getFilesDir(), "arena_suite_latest.tmp");
+            try (FileOutputStream fos = new FileOutputStream(tempFile)) {
+                fos.write(patched.getBytes(StandardCharsets.UTF_8));
+            }
+            if (!tempFile.renameTo(targetFile)) {
+                targetFile.delete();
+                tempFile.renameTo(targetFile);
+            }
+            this.suiteScript = patched;
+            // No prompt, just reload on UI thread as requested
+            runOnUiThread(new ReloadRunnable(this.webView));
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    public static String patchMobileSafeMargin(String code) {
+        if (code == null) return "";
+        // 1. Ensure mini mode detail button safe margin (20px)
+        code = code.replace(":host([data-mini]) .bar{padding-right:6px}", ":host([data-mini]) .bar{padding-right:20px}");
+        // 2. Ensure bottom bar left & right safe padding (padding: 0 20px 0 24px)
+        code = code.replaceAll("(\\.bar\\{box-sizing:border-box;height:\\$\\{BAR_H\\}px;display:flex;align-items:center;gap:0;)padding:[^;]+;",
+                "$1padding:0 20px 0 24px;");
+        return code;
+    }
+
+    public static String extractVersion(String script) {
+        if (script == null) return "0.0.0";
+        try {
+            Pattern p = Pattern.compile("@version\\s+([0-9.]+)");
+            Matcher m = p.matcher(script);
+            if (m.find()) {
+                return m.group(1);
+            }
+        } catch (Exception e) {}
+        return "0.0.0";
+    }
+
+    public static int compareVersions(String v1, String v2) {
+        if (v1 == null) v1 = "0.0.0";
+        if (v2 == null) v2 = "0.0.0";
+        String[] p1 = v1.split("\\.");
+        String[] p2 = v2.split("\\.");
+        int len = Math.max(p1.length, p2.length);
+        for (int i = 0; i < len; i++) {
+            int n1 = 0;
+            int n2 = 0;
+            try {
+                if (i < p1.length) n1 = Integer.parseInt(p1[i].trim());
+            } catch (Exception e) {}
+            try {
+                if (i < p2.length) n2 = Integer.parseInt(p2[i].trim());
+            } catch (Exception e) {}
+            if (n1 != n2) {
+                return n1 > n2 ? 1 : -1;
+            }
+        }
+        return 0;
+    }
+
+    public String loadCurrentScript() {
+        String assetScript = loadAssetScript("arena_suite.js");
+        String assetVer = extractVersion(assetScript);
+        File diskFile = new File(getFilesDir(), "arena_suite_latest.js");
+        if (diskFile.exists() && diskFile.length() > 5000) {
+            try (InputStream is = new FileInputStream(diskFile);
+                 BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    sb.append(line).append("\n");
+                }
+                String diskScript = sb.toString();
+                String diskVer = extractVersion(diskScript);
+                if (compareVersions(diskVer, assetVer) >= 0) {
+                    return diskScript;
+                } else {
+                    diskFile.delete();
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+        return assetScript;
     }
 
     private String loadAssetScript(String assetName) {

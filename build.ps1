@@ -43,6 +43,7 @@ if (Test-Path "build\app-aligned.apk") { Remove-Item -Force "build\app-aligned.a
 & "$BUILD_TOOLS\zipalign.exe" -p -f 4 build\app-unsigned.apk build\app-aligned.apk
 
 Write-Host "--- 7. Sign with apksigner ---"
+if (Test-Path "D:\Arena_AI.apk") { Remove-Item -Force "D:\Arena_AI.apk" }
 & "$BUILD_TOOLS\apksigner.bat" sign `
     --ks arena.keystore `
     --ks-pass pass:arena123 `
@@ -54,4 +55,5 @@ Write-Host "--- 7. Sign with apksigner ---"
 Write-Host "--- 8. Verify APK Signature ---"
 & "$BUILD_TOOLS\apksigner.bat" verify -v "D:\Arena_AI.apk"
 
+Copy-Item -Force "D:\Arena_AI.apk" "Arena_AI.apk"
 Write-Host "BUILD COMPLETED SUCCESSFULLY!"
