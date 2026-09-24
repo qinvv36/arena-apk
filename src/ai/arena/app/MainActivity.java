@@ -5,6 +5,7 @@ import android.app.Dialog;
 import android.content.ActivityNotFoundException;
 import android.content.ClipData;
 import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
@@ -15,12 +16,15 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Message;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
+import android.view.inputmethod.InputMethodManager;
 import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -37,7 +41,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 
-public class MainActivity extends Activity implements OnBackInvokedCallback, View.OnApplyWindowInsetsListener {
+public class MainActivity extends Activity implements OnBackInvokedCallback, View.OnApplyWindowInsetsListener, View.OnTouchListener, Runnable {
 
     public WebView webView;
     public ProgressBar progressBar;
@@ -71,6 +75,11 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         webView.setLayoutParams(new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
+        webView.setFocusable(true);
+        webView.setFocusableInTouchMode(true);
+        webView.requestFocus(View.FOCUS_DOWN);
+        webView.addJavascriptInterface(new AndroidBridge(this), "AndroidBridge");
+        webView.setOnTouchListener(this);
         rootLayout.addView(webView);
 
         // Top horizontal progress bar
@@ -250,6 +259,45 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
     }
 
     @Override
+    public boolean onTouch(View v, MotionEvent event) {
+        if (event.getAction() == MotionEvent.ACTION_DOWN || event.getAction() == MotionEvent.ACTION_UP) {
+            if (!v.hasFocus()) {
+                v.requestFocus();
+            }
+        }
+        return false;
+    }
+
+    @Override
+    public void run() {
+        if (webView != null) {
+            if (!webView.hasFocus()) {
+                webView.requestFocus();
+            }
+            InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+            if (imm != null) {
+                imm.restartInput(webView);
+                imm.showSoftInput(webView, InputMethodManager.SHOW_IMPLICIT);
+            }
+        }
+    }
+
+    public static class AndroidBridge {
+        private final MainActivity activity;
+
+        public AndroidBridge(MainActivity activity) {
+            this.activity = activity;
+        }
+
+        @JavascriptInterface
+        public void requestInputFocus() {
+            if (activity != null) {
+                activity.runOnUiThread(activity);
+            }
+        }
+    }
+
+    @Override
     public void onBackInvoked() {
         if (webView != null && webView.canGoBack()) {
             webView.goBack();
@@ -268,13 +316,51 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         }
 
         private void tryInject(WebView view, String url) {
+            // 1. Universal input focus & soft keyboard handshake fix (all pages & SPA navigation)
+            String inputFix = "javascript:(function(){" +
+                    "if(window.__arena_input_focus_fix_installed__)return;" +
+                    "window.__arena_input_focus_fix_installed__=true;" +
+                    "function triggerNative(el){" +
+                    "  if(!el)return;" +
+                    "  try{if(window.AndroidBridge&&window.AndroidBridge.requestInputFocus){window.AndroidBridge.requestInputFocus();}}catch(e){}" +
+                    "}" +
+                    "var lastActive=null;" +
+                    "function checkActive(){" +
+                    "  var el=document.activeElement;" +
+                    "  if(el&&(el.tagName==='INPUT'||el.tagName==='TEXTAREA'||el.isContentEditable)){" +
+                    "    if(el!==lastActive){lastActive=el;triggerNative(el);}" +
+                    "  }else{lastActive=null;}" +
+                    "}" +
+                    "document.addEventListener('focusin',function(e){" +
+                    "  var el=e.target;" +
+                    "  if(el&&(el.tagName==='INPUT'||el.tagName==='TEXTAREA'||el.isContentEditable)){" +
+                    "    lastActive=el;triggerNative(el);" +
+                    "  }" +
+                    "},true);" +
+                    "var onTouch=function(e){" +
+                    "  var el=e.target;" +
+                    "  if(el&&(el.tagName==='INPUT'||el.tagName==='TEXTAREA'||el.isContentEditable)){" +
+                    "    triggerNative(el);" +
+                    "  }" +
+                    "};" +
+                    "document.addEventListener('pointerdown',onTouch,{passive:true,capture:true});" +
+                    "document.addEventListener('touchstart',onTouch,{passive:true,capture:true});" +
+                    "document.addEventListener('click',onTouch,true);" +
+                    "try{" +
+                    "  var ob=new MutationObserver(function(){checkActive();});" +
+                    "  ob.observe(document.documentElement||document,{childList:true,subtree:true,attributes:true,attributeFilter:['style','class','hidden','type']});" +
+                    "}catch(e){}" +
+                    "checkActive();" +
+                    "})();";
+            view.evaluateJavascript(inputFix, null);
+
             if (url != null && (url.contains("arena.ai") || url.contains("lmsys.org"))) {
-                // 1. Sync light/dark theme according to system
+                // 2. Sync light/dark theme according to system
                 if (activity != null) {
                     activity.syncWebPageTheme(activity.isSystemNightMode());
                 }
 
-                // 2. Inject bottom lifting style fix so bottom text and input area are comfortable and never cut off
+                // 3. Inject bottom lifting style fix so bottom text and input area are comfortable and never cut off
                 String cssFix = "javascript:(function(){" +
                         "if(!document.getElementById('__arena_mobile_bottom_fix__')){" +
                         "var st=document.createElement('style');" +
@@ -288,7 +374,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                         "}})();";
                 view.evaluateJavascript(cssFix, null);
 
-                // 3. Inject userscript
+                // 4. Inject userscript
                 if (suiteScript != null && !suiteScript.isEmpty()) {
                     view.evaluateJavascript(suiteScript, null);
                 }
