@@ -25,7 +25,8 @@ Write-Host "--- 2. Link APK with AAPT2 ---"
 Write-Host "--- 3. Compile Java sources ---"
 if (Test-Path "build\obj") { Remove-Item -Recurse -Force "build\obj" }
 New-Item -ItemType Directory -Force -Path "build\obj" | Out-Null
-& "D:\jdk-21\bin\javac.exe" -source 17 -target 17 -cp $PLATFORM_JAR -d build\obj src\ai\arena\app\MainActivity.java
+$javaFiles = Get-ChildItem -Path "src\ai\arena\app\*.java" | ForEach-Object { $_.FullName }
+& "D:\jdk-21\bin\javac.exe" -encoding UTF-8 -source 17 -target 17 -cp $PLATFORM_JAR -d build\obj $javaFiles
 
 Write-Host "--- 4. Run D8 Dexer ---"
 if (Test-Path "build\dex") { Remove-Item -Recurse -Force "build\dex" }

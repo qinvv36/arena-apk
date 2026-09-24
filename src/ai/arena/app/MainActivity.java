@@ -61,13 +61,18 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
     public WebChromeClient.FileChooserParams pendingChooserParams;
     public static final int FILECHOOSER_RESULTCODE = 1001;
     public static final int PERMISSION_REQUEST_MEDIA = 2001;
+    public static volatile boolean isActivityVisible = false;
     public String suiteScript = "";
     public boolean isCurrentDark = false;
     public boolean lastConfigNight = false;
+    public boolean needsWebThemeSync = true;
+    public boolean targetWebThemeDark = false;
+    public boolean isWaitingForResult = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        isActivityVisible = true;
 
         // Enable true immersive fullscreen & camera cutout area
         try {
@@ -85,22 +90,15 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
             t.printStackTrace();
         }
 
-        boolean isNight = isSystemNightMode();
+        boolean isNight = isSystemNightMode(this);
         this.lastConfigNight = isNight;
         this.isCurrentDark = isNight;
+        this.needsWebThemeSync = true;
+        this.targetWebThemeDark = isNight;
 
-        ComponentName launchedComp = getIntent() != null ? getIntent().getComponent() : null;
-        String className = launchedComp != null ? launchedComp.getClassName() : "";
-        boolean isLightAlias = className.contains("MainActivityLight");
-        boolean isDarkAlias = className.contains("MainActivityDark");
-
-        if ((isLightAlias && isNight) || (isDarkAlias && !isNight)) {
-            applyLauncherIconSetting(isNight);
-            finishAffinity();
-            return;
-        }
-
-        applyLauncherIconSetting(isNight);
+        try {
+            startService(new Intent(this, ThemeMonitorService.class));
+        } catch (Throwable ignored) {}
 
         // Load userscript (prioritizes hot-updated script in filesDir over APK assets)
         suiteScript = loadCurrentScript();
@@ -200,7 +198,12 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
     }
 
     public boolean isSystemNightMode() {
-        int uiMode = getResources().getConfiguration().uiMode;
+        return isSystemNightMode(this);
+    }
+
+    public static boolean isSystemNightMode(Context context) {
+        if (context == null) return false;
+        int uiMode = context.getResources().getConfiguration().uiMode;
         return (uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
     }
 
@@ -273,52 +276,145 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
     }
 
     @Override
+    protected void onStart() {
+        super.onStart();
+        isActivityVisible = true;
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
+        isActivityVisible = true;
+        isWaitingForResult = false;
         applyFullScreen();
+        boolean isNight = isSystemNightMode(this);
+        if (isNight != this.lastConfigNight) {
+            this.lastConfigNight = isNight;
+            this.isCurrentDark = isNight;
+            this.needsWebThemeSync = true;
+            this.targetWebThemeDark = isNight;
+            updateSystemBarsAndTheme(isNight);
+            syncWebPageTheme(isNight);
+        }
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        if (!isWaitingForResult) {
+            isActivityVisible = false;
+            applyLauncherIconSetting(this, isSystemNightMode(this));
+        }
     }
 
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
         boolean isNight = (newConfig.uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
-        if (isNight != this.lastConfigNight) {
-            this.lastConfigNight = isNight;
-            this.isCurrentDark = isNight;
-            applyLauncherIconSetting(isNight);
-            finishAffinity();
-            return;
-        }
+        this.lastConfigNight = isNight;
+        this.isCurrentDark = isNight;
+        this.needsWebThemeSync = true;
+        this.targetWebThemeDark = isNight;
         updateSystemBarsAndTheme(isNight);
+        syncWebPageTheme(isNight);
+        if (!isActivityVisible) {
+            applyLauncherIconSetting(this, isNight);
+        }
     }
 
-    public void applyLauncherIconSetting(boolean isNight) {
+    public static void applyLauncherIconSetting(Context context, boolean isNight) {
+        if (context == null) return;
         try {
-            PackageManager pm = getPackageManager();
-            ComponentName lightComp = new ComponentName(this, "ai.arena.app.MainActivityLight");
-            ComponentName darkComp = new ComponentName(this, "ai.arena.app.MainActivityDark");
+            PackageManager pm = context.getPackageManager();
+            ComponentName lightComp = new ComponentName(context, "ai.arena.app.MainActivityLight");
+            ComponentName darkComp = new ComponentName(context, "ai.arena.app.MainActivityDark");
 
-            int targetLightState = isNight ? PackageManager.COMPONENT_ENABLED_STATE_DISABLED : PackageManager.COMPONENT_ENABLED_STATE_ENABLED;
-            int targetDarkState = isNight ? PackageManager.COMPONENT_ENABLED_STATE_ENABLED : PackageManager.COMPONENT_ENABLED_STATE_DISABLED;
+            int lightState = pm.getComponentEnabledSetting(lightComp);
+            int darkState = pm.getComponentEnabledSetting(darkComp);
+
+            boolean isLightEnabled = (lightState == PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                    || lightState == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT);
+            boolean isDarkEnabled = (darkState == PackageManager.COMPONENT_ENABLED_STATE_ENABLED);
 
             if (isNight) {
-                if (pm.getComponentEnabledSetting(darkComp) != targetDarkState) {
-                    pm.setComponentEnabledSetting(darkComp, targetDarkState, PackageManager.DONT_KILL_APP);
+                if (!isDarkEnabled) {
+                    pm.setComponentEnabledSetting(darkComp, PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP);
                 }
-                if (pm.getComponentEnabledSetting(lightComp) != targetLightState) {
-                    pm.setComponentEnabledSetting(lightComp, targetLightState, PackageManager.DONT_KILL_APP);
+                if (isLightEnabled) {
+                    pm.setComponentEnabledSetting(lightComp, PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP);
                 }
             } else {
-                if (pm.getComponentEnabledSetting(lightComp) != targetLightState) {
-                    pm.setComponentEnabledSetting(lightComp, targetLightState, PackageManager.DONT_KILL_APP);
+                if (!isLightEnabled) {
+                    pm.setComponentEnabledSetting(lightComp, PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP);
                 }
-                if (pm.getComponentEnabledSetting(darkComp) != targetDarkState) {
-                    pm.setComponentEnabledSetting(darkComp, targetDarkState, PackageManager.DONT_KILL_APP);
+                if (isDarkEnabled) {
+                    pm.setComponentEnabledSetting(darkComp, PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP);
                 }
             }
         } catch (Throwable t) {
             t.printStackTrace();
         }
+    }
+
+    public static class DelayedThemeSyncRunnable implements Runnable {
+        private final MainActivity activity;
+        private final boolean isNight;
+
+        public DelayedThemeSyncRunnable(MainActivity activity, boolean isNight) {
+            this.activity = activity;
+            this.isNight = isNight;
+        }
+
+        @Override
+        public void run() {
+            if (activity != null && activity.webView != null) {
+                activity.executeThemeSyncJs(isNight);
+            }
+        }
+    }
+
+    public void syncWebPageTheme(boolean isNight) {
+        if (webView == null) return;
+        executeThemeSyncJs(isNight);
+        webView.postDelayed(new DelayedThemeSyncRunnable(this, isNight), 250);
+    }
+
+    public void executeThemeSyncJs(boolean isNight) {
+        if (webView == null) return;
+        String js = String.format(
+            "javascript:(function(){" +
+            "  var isDark = %b;" +
+            "  var target = isDark ? 'dark' : 'light';" +
+            "  var remove = isDark ? 'light' : 'dark';" +
+            "  var d = document.documentElement;" +
+            "  if (d) {" +
+            "    d.classList.remove(remove);" +
+            "    d.classList.add(target);" +
+            "    d.style.colorScheme = target;" +
+            "    if (d.dataset) {" +
+            "      d.dataset.theme = target;" +
+            "      d.dataset.colorScheme = target;" +
+            "    }" +
+            "  }" +
+            "  if (document.body) {" +
+            "    document.body.classList.remove(remove);" +
+            "    document.body.classList.add(target);" +
+            "    document.body.style.colorScheme = target;" +
+            "  }" +
+            "  try { localStorage.setItem('theme', target); } catch(e) {}" +
+            "  try {" +
+            "    window.dispatchEvent(new StorageEvent('storage', {" +
+            "      key: 'theme'," +
+            "      newValue: target," +
+            "      oldValue: remove," +
+            "      storageArea: localStorage," +
+            "      url: window.location.href" +
+            "    }));" +
+            "  } catch(e) {}" +
+            "})();",
+            isNight
+        );
+        webView.evaluateJavascript(js, null);
     }
 
     public void updateSystemBarsAndTheme(boolean isDark) {
@@ -782,6 +878,9 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         @Override
         public void onPageStarted(WebView view, String url, Bitmap favicon) {
             super.onPageStarted(view, url, favicon);
+            if (activity != null && activity.needsWebThemeSync && url != null && (url.contains("arena.ai") || url.contains("lmsys.org"))) {
+                activity.executeThemeSyncJs(activity.targetWebThemeDark);
+            }
             tryInject(view, url);
             injectPullToRefresh(view);
         }
@@ -789,6 +888,10 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         @Override
         public void onPageFinished(WebView view, String url) {
             super.onPageFinished(view, url);
+            if (activity != null && activity.needsWebThemeSync && url != null && (url.contains("arena.ai") || url.contains("lmsys.org"))) {
+                activity.syncWebPageTheme(activity.targetWebThemeDark);
+                activity.needsWebThemeSync = false;
+            }
             tryInject(view, url);
             injectPullToRefresh(view);
             resetPullToRefresh(view);
@@ -841,6 +944,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
             }
             activity.uploadMessage = filePathCallback;
             activity.pendingChooserParams = fileChooserParams;
+            activity.isWaitingForResult = true;
 
             // Check if media permissions need to be requested dynamically from the user
             List<String> neededPermissions = new ArrayList<>();
