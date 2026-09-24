@@ -15,6 +15,9 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Message;
+import android.provider.MediaStore;
+import java.util.ArrayList;
+import java.util.List;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -543,9 +546,8 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                         "st.textContent='" +
                         "main,[role=\"main\"]{padding-bottom:32px !important;}" +
                         "form:has(textarea[name=\"message\"]),form:has(textarea){margin-bottom:16px !important;}" +
-                        "p.text-xs,div.text-xs{margin-bottom:12px !important;}" +
                         "#amp-native-bar{z-index:99999 !important;}" +
-                        "aside,[data-sidebar]{padding-bottom:28px !important;}" +
+                        "div[data-sidebar=\"footer\"]{padding-bottom:28px !important;}" +
                         "';" +
                         "(document.head||document.documentElement).appendChild(st);" +
                         "}})();";
@@ -611,21 +613,71 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                                          FileChooserParams fileChooserParams) {
             if (activity.uploadMessage != null) {
                 activity.uploadMessage.onReceiveValue(null);
+                activity.uploadMessage = null;
             }
             activity.uploadMessage = filePathCallback;
 
-            Intent intent = null;
+            Intent chooserIntent = null;
             try {
-                intent = fileChooserParams.createIntent();
+                // 1. Primary intent from fileChooserParams (handles all files)
+                Intent contentIntent = fileChooserParams != null ? fileChooserParams.createIntent() : null;
+                if (contentIntent == null) {
+                    contentIntent = new Intent(Intent.ACTION_GET_CONTENT);
+                    contentIntent.addCategory(Intent.CATEGORY_OPENABLE);
+                    contentIntent.setType("*/*");
+                }
+                contentIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                if (fileChooserParams != null && fileChooserParams.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE) {
+                    contentIntent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                }
+
+                // 2. Extra initial intents (Native Gallery & Modern Photo Picker)
+                List<Intent> extraIntents = new ArrayList<>();
+
+                // Native Gallery picker (broad compatibility with Xiaomi, Huawei, Oppo, Vivo, Samsung)
+                try {
+                    Intent galleryIntent = new Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
+                    galleryIntent.setType("image/*");
+                    galleryIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    if (fileChooserParams != null && fileChooserParams.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE) {
+                        galleryIntent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                    }
+                    extraIntents.add(galleryIntent);
+                } catch (Throwable ignored) {}
+
+                // Android 13+ (API 33) Modern Photo Picker
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    try {
+                        Intent photoPickerIntent = new Intent(MediaStore.ACTION_PICK_IMAGES);
+                        photoPickerIntent.setType("image/*");
+                        photoPickerIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        if (fileChooserParams != null && fileChooserParams.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE) {
+                            photoPickerIntent.putExtra(MediaStore.EXTRA_PICK_IMAGES_MAX, MediaStore.getPickImagesMaxLimit());
+                        }
+                        extraIntents.add(photoPickerIntent);
+                    } catch (Throwable ignored) {}
+                }
+
+                chooserIntent = Intent.createChooser(contentIntent, "选择图片或文件");
+                if (!extraIntents.isEmpty()) {
+                    chooserIntent.putExtra(Intent.EXTRA_INITIAL_INTENTS, extraIntents.toArray(new Intent[0]));
+                }
             } catch (Exception e) {
-                intent = new Intent(Intent.ACTION_GET_CONTENT);
-                intent.addCategory(Intent.CATEGORY_OPENABLE);
-                intent.setType("*/*");
+                Intent fallback = new Intent(Intent.ACTION_GET_CONTENT);
+                fallback.addCategory(Intent.CATEGORY_OPENABLE);
+                fallback.setType("*/*");
+                fallback.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                fallback.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                chooserIntent = Intent.createChooser(fallback, "选择图片或文件");
             }
+
             try {
-                activity.startActivityForResult(intent, FILECHOOSER_RESULTCODE);
-            } catch (ActivityNotFoundException e) {
-                activity.uploadMessage = null;
+                activity.startActivityForResult(chooserIntent, FILECHOOSER_RESULTCODE);
+            } catch (Exception e) {
+                if (activity.uploadMessage != null) {
+                    activity.uploadMessage.onReceiveValue(null);
+                    activity.uploadMessage = null;
+                }
                 return false;
             }
             return true;
@@ -849,15 +901,25 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
             if (uploadMessage != null) {
                 Uri[] results = null;
                 if (resultCode == RESULT_OK && data != null) {
-                    String dataString = data.getDataString();
                     ClipData clipData = data.getClipData();
-                    if (clipData != null) {
-                        results = new Uri[clipData.getItemCount()];
-                        for (int i = 0; i < clipData.getItemCount(); i++) {
-                            results[i] = clipData.getItemAt(i).getUri();
+                    if (clipData != null && clipData.getItemCount() > 0) {
+                        int count = clipData.getItemCount();
+                        results = new Uri[count];
+                        for (int i = 0; i < count; i++) {
+                            Uri u = clipData.getItemAt(i).getUri();
+                            results[i] = u;
+                            grantUriPermissionsSafely(u);
                         }
-                    } else if (dataString != null) {
-                        results = new Uri[]{Uri.parse(dataString)};
+                    } else if (data.getData() != null) {
+                        Uri u = data.getData();
+                        results = new Uri[]{u};
+                        grantUriPermissionsSafely(u);
+                    } else if (data.getDataString() != null) {
+                        try {
+                            Uri u = Uri.parse(data.getDataString());
+                            results = new Uri[]{u};
+                            grantUriPermissionsSafely(u);
+                        } catch (Throwable ignored) {}
                     }
                 }
                 uploadMessage.onReceiveValue(results);
@@ -866,6 +928,16 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         } else {
             super.onActivityResult(requestCode, resultCode, data);
         }
+    }
+
+    private void grantUriPermissionsSafely(Uri uri) {
+        if (uri == null) return;
+        try {
+            grantUriPermission(getPackageName(), uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (Throwable ignored) {}
+        try {
+            getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (Throwable ignored) {}
     }
 
     @Override
