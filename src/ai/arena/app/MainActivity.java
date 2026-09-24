@@ -63,13 +63,20 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         super.onCreate(savedInstanceState);
 
         // Enable true immersive fullscreen & camera cutout area
-        Window window = getWindow();
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            WindowManager.LayoutParams lp = window.getAttributes();
-            lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
-            window.setAttributes(lp);
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                Window window = getWindow();
+                if (window != null) {
+                    WindowManager.LayoutParams lp = window.getAttributes();
+                    if (lp != null) {
+                        lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+                        window.setAttributes(lp);
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            t.printStackTrace();
         }
-        applyFullScreen();
 
         // Synchronize launcher icon based on current system Dark/Light theme
         boolean isNight = isSystemNightMode();
@@ -109,6 +116,9 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         rootLayout.addView(progressBar);
 
         setContentView(rootLayout);
+
+        // Apply fullscreen safely after decor view is attached
+        applyFullScreen();
 
         // Apply dark/light status bar & navigation bar colors
         updateSystemBarsAndTheme(isNight);
@@ -173,33 +183,62 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
 
     @Override
     public WindowInsets onApplyWindowInsets(View v, WindowInsets insets) {
-        // ONLY lift view for IME (soft keyboard)!
-        // NEVER pad for navigationBars or displayCutout, ensuring true edge-to-edge fullscreen
-        // and avoiding the ugly blank gap / broken layout when the gesture navigation bar is active.
-        int imeBottom = insets.getInsets(WindowInsets.Type.ime()).bottom;
-        v.setPadding(0, 0, 0, imeBottom);
+        if (insets == null) return insets;
+        try {
+            int imeBottom = insets.getInsets(WindowInsets.Type.ime()).bottom;
+            v.setPadding(0, 0, 0, imeBottom);
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
         return insets;
     }
 
     public void applyFullScreen() {
-        Window window = getWindow();
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            window.setDecorFitsSystemWindows(false);
-            WindowInsetsController controller = window.getInsetsController();
-            if (controller != null) {
-                controller.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
-                controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+        try {
+            Window window = getWindow();
+            if (window == null) return;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                window.setDecorFitsSystemWindows(false);
+                View decorView = window.peekDecorView();
+                if (decorView == null) {
+                    try {
+                        decorView = window.getDecorView();
+                    } catch (Throwable ignored) {}
+                }
+                if (decorView != null) {
+                    WindowInsetsController controller = decorView.getWindowInsetsController();
+                    if (controller != null) {
+                        controller.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+                        controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                    }
+                }
+            } else {
+                View decorView = window.peekDecorView();
+                if (decorView == null) {
+                    try {
+                        decorView = window.getDecorView();
+                    } catch (Throwable ignored) {}
+                }
+                if (decorView != null) {
+                    decorView.setSystemUiVisibility(
+                        View.SYSTEM_UI_FLAG_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    );
+                }
             }
-        } else {
-            window.getDecorView().setSystemUiVisibility(
-                View.SYSTEM_UI_FLAG_FULLSCREEN
-                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-            );
+        } catch (Throwable t) {
+            t.printStackTrace();
         }
+    }
+
+    @Override
+    public void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        applyFullScreen();
     }
 
     @Override
@@ -228,36 +267,48 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
     }
 
     public void updateSystemBarsAndTheme(boolean isNight) {
-        int themeColor = isNight ? Color.parseColor("#111113") : Color.parseColor("#FFFFFF");
+        try {
+            int themeColor = isNight ? Color.parseColor("#111113") : Color.parseColor("#FFFFFF");
 
-        Window window = getWindow();
-        window.setStatusBarColor(Color.TRANSPARENT);
-        window.setNavigationBarColor(Color.TRANSPARENT);
+            Window window = getWindow();
+            if (window != null) {
+                window.setStatusBarColor(Color.TRANSPARENT);
+                window.setNavigationBarColor(Color.TRANSPARENT);
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            WindowInsetsController controller = window.getInsetsController();
-            if (controller != null) {
-                if (isNight) {
-                    // In dark mode: status bar icons must be WHITE
-                    controller.setSystemBarsAppearance(0,
-                        WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS);
-                } else {
-                    // In light mode: status bar icons must be DARK
-                    controller.setSystemBarsAppearance(
-                        WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
-                        WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    View decorView = window.peekDecorView();
+                    if (decorView == null) {
+                        try {
+                            decorView = window.getDecorView();
+                        } catch (Throwable ignored) {}
+                    }
+                    if (decorView != null) {
+                        WindowInsetsController controller = decorView.getWindowInsetsController();
+                        if (controller != null) {
+                            if (isNight) {
+                                controller.setSystemBarsAppearance(0,
+                                    WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS);
+                            } else {
+                                controller.setSystemBarsAppearance(
+                                    WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
+                                    WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS);
+                            }
+                        }
+                    }
                 }
             }
-        }
 
-        if (webView != null) {
-            webView.setBackgroundColor(themeColor);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                webView.getSettings().setAlgorithmicDarkeningAllowed(isNight);
+            if (webView != null) {
+                webView.setBackgroundColor(themeColor);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    webView.getSettings().setAlgorithmicDarkeningAllowed(isNight);
+                }
+                syncWebPageTheme(isNight);
             }
-            syncWebPageTheme(isNight);
+            applyFullScreen();
+        } catch (Throwable t) {
+            t.printStackTrace();
         }
-        applyFullScreen();
     }
 
     public void syncWebPageTheme(boolean isNight) {
