@@ -715,6 +715,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                         "main,[role=\"main\"]{padding-bottom:32px !important;}" +
                         "form:has(textarea[name=\"message\"]),form:has(textarea){margin-bottom:16px !important;}" +
                         "#amp-native-bar{z-index:99999 !important;}" +
+                        "#amp-lite-panel,[data-entry]{display:none !important;}" +
                         "div[data-sidebar=\"footer\"]{padding-bottom:28px !important;}" +
                         "';" +
                         "(document.head||document.documentElement).appendChild(st);" +
@@ -1111,6 +1112,13 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                 "$1padding:0 20px 0 24px;");
         // 3. Ensure bottom bar stays on top of sidebar drawers
         code = code.replace("z-index:30;", "z-index:99999;");
+        // 4. Remove top-right theme toggle button (#amp-lite-panel / .theme-toggle)
+        code = code.replace("const entry=el('div');entry.id='amp-lite-panel';entry.setAttribute('data-entry','');document.body.append(entry);",
+                "const entry=el('div');entry.id='amp-lite-panel';entry.setAttribute('data-entry','');entry.hidden=true;entry.style.setProperty('display','none','important');");
+        code = code.replace("const eligible=/^\\/agent(?:\\/|$)/.test(location.pathname);entry.hidden=!eligible;",
+                "const eligible=/^\\/agent(?:\\/|$)/.test(location.pathname);entry.hidden=true;");
+        code = code.replace(":host([data-entry]){all:initial;display:inline-flex;align-items:center;margin-right:6px;font:500 12px/1 var(--font-basel-grotesk,var(--font-inter,system-ui)),'PingFang SC','Microsoft YaHei',sans-serif}",
+                ":host([data-entry]){display:none!important}");
         return code;
     }
 
@@ -1162,8 +1170,8 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                 }
                 String diskScript = sb.toString();
                 String diskVer = extractVersion(diskScript);
-                if (compareVersions(diskVer, assetVer) >= 0) {
-                    return diskScript;
+                if (compareVersions(diskVer, assetVer) > 0) {
+                    return patchMobileSafeMargin(diskScript);
                 } else {
                     diskFile.delete();
                 }
