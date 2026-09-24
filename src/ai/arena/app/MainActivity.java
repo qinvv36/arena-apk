@@ -62,6 +62,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
     public static final int FILECHOOSER_RESULTCODE = 1001;
     public static final int PERMISSION_REQUEST_MEDIA = 2001;
     public String suiteScript = "";
+    public boolean isCurrentDark = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -84,6 +85,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         }
 
         boolean isNight = isSystemNightMode();
+        this.isCurrentDark = isNight;
 
         // Load userscript (prioritizes hot-updated script in filesDir over APK assets)
         suiteScript = loadCurrentScript();
@@ -143,9 +145,9 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         settings.setDisplayZoomControls(false);
         settings.setSafeBrowsingEnabled(true);
 
-        // Modern Android 13+ algorithmic darkening - only allowed in dark mode
+        // Disable algorithmic darkening so webpage can freely toggle light and dark mode without forced inversion
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            settings.setAlgorithmicDarkeningAllowed(isNight);
+            settings.setAlgorithmicDarkeningAllowed(false);
         }
 
         // Configure modern Chrome Mobile User Agent (Android 14 Chrome 128+)
@@ -259,20 +261,46 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
     protected void onResume() {
         super.onResume();
         applyFullScreen();
-        boolean isNight = isSystemNightMode();
-        updateSystemBarsAndTheme(isNight);
     }
 
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
         boolean isNight = (newConfig.uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+        this.isCurrentDark = isNight;
         updateSystemBarsAndTheme(isNight);
     }
 
-    public void updateSystemBarsAndTheme(boolean isNight) {
+    @Override
+    protected void onStop() {
+        super.onStop();
+        syncLauncherIcon();
+    }
+
+    public void syncLauncherIcon() {
         try {
-            int themeColor = isNight ? Color.parseColor("#111113") : Color.parseColor("#FFFFFF");
+            PackageManager pm = getPackageManager();
+            ComponentName lightComp = new ComponentName(this, "ai.arena.app.MainActivityLight");
+            ComponentName darkComp = new ComponentName(this, "ai.arena.app.MainActivityDark");
+
+            int targetLightState = isCurrentDark ? PackageManager.COMPONENT_ENABLED_STATE_DISABLED : PackageManager.COMPONENT_ENABLED_STATE_ENABLED;
+            int targetDarkState = isCurrentDark ? PackageManager.COMPONENT_ENABLED_STATE_ENABLED : PackageManager.COMPONENT_ENABLED_STATE_DISABLED;
+
+            if (pm.getComponentEnabledSetting(lightComp) != targetLightState) {
+                pm.setComponentEnabledSetting(lightComp, targetLightState, PackageManager.DONT_KILL_APP);
+            }
+            if (pm.getComponentEnabledSetting(darkComp) != targetDarkState) {
+                pm.setComponentEnabledSetting(darkComp, targetDarkState, PackageManager.DONT_KILL_APP);
+            }
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
+    }
+
+    public void updateSystemBarsAndTheme(boolean isDark) {
+        try {
+            this.isCurrentDark = isDark;
+            int themeColor = isDark ? Color.parseColor("#111113") : Color.parseColor("#FFFFFF");
 
             Window window = getWindow();
             if (window != null) {
@@ -289,7 +317,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                     if (decorView != null) {
                         WindowInsetsController controller = decorView.getWindowInsetsController();
                         if (controller != null) {
-                            if (isNight) {
+                            if (isDark) {
                                 controller.setSystemBarsAppearance(0,
                                     WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS);
                             } else {
@@ -304,37 +332,11 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
 
             if (webView != null) {
                 webView.setBackgroundColor(themeColor);
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    webView.getSettings().setAlgorithmicDarkeningAllowed(isNight);
-                }
-                syncWebPageTheme(isNight);
             }
             applyFullScreen();
         } catch (Throwable t) {
             t.printStackTrace();
         }
-    }
-
-    public void syncWebPageTheme(boolean isNight) {
-        if (webView == null) return;
-        String js = String.format(
-            "javascript:(function(){" +
-            "var isDark = %b;" +
-            "var d = document.documentElement;" +
-            "var target = isDark ? 'dark' : 'light';" +
-            "var remove = isDark ? 'light' : 'dark';" +
-            "if(d){" +
-            "  d.classList.remove(remove);" +
-            "  d.classList.add(target);" +
-            "  d.style.colorScheme = target;" +
-            "  if(d.dataset) d.dataset.theme = target;" +
-            "}" +
-            "try{localStorage.setItem('theme', target);}catch(e){}" +
-            "try{window.dispatchEvent(new StorageEvent('storage',{key:'theme',newValue:target}));}catch(e){}" +
-            "})();",
-            isNight
-        );
-        webView.evaluateJavascript(js, null);
     }
 
     @Override
@@ -414,11 +416,35 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         }
     }
 
+    public static class ThemeChangeRunnable implements Runnable {
+        private final MainActivity activity;
+        private final boolean isDark;
+
+        public ThemeChangeRunnable(MainActivity activity, boolean isDark) {
+            this.activity = activity;
+            this.isDark = isDark;
+        }
+
+        @Override
+        public void run() {
+            if (activity != null) {
+                activity.updateSystemBarsAndTheme(isDark);
+            }
+        }
+    }
+
     public static class AndroidBridge {
         private final MainActivity activity;
 
         public AndroidBridge(MainActivity activity) {
             this.activity = activity;
+        }
+
+        @JavascriptInterface
+        public void onThemeChanged(boolean isDark) {
+            if (activity != null) {
+                activity.runOnUiThread(new ThemeChangeRunnable(activity, isDark));
+            }
         }
 
         @JavascriptInterface
@@ -537,10 +563,28 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
             view.evaluateJavascript(inputFix, null);
 
             if (url != null && (url.contains("arena.ai") || url.contains("lmsys.org"))) {
-                // 2. Sync light/dark theme according to system
-                if (activity != null) {
-                    activity.syncWebPageTheme(activity.isSystemNightMode());
-                }
+                // 2. Observe web page theme changes (user toggling light/dark inside the app) and sync to native status bar
+                String themeObserver = "javascript:(function(){" +
+                        "if(window.__arena_theme_observer_installed__)return;" +
+                        "window.__arena_theme_observer_installed__=true;" +
+                        "function reportTheme(){" +
+                        "  var d=document.documentElement;" +
+                        "  if(!d)return;" +
+                        "  var isDark=d.classList.contains('dark')||(d.dataset&&d.dataset.theme==='dark')||(!d.classList.contains('light')&&window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);" +
+                        "  try{" +
+                        "    if(window.AndroidBridge&&window.AndroidBridge.onThemeChanged){" +
+                        "      window.AndroidBridge.onThemeChanged(isDark);" +
+                        "    }" +
+                        "  }catch(e){}" +
+                        "}" +
+                        "reportTheme();" +
+                        "try{" +
+                        "  var ob=new MutationObserver(reportTheme);" +
+                        "  ob.observe(document.documentElement,{attributes:true,attributeFilter:['class','data-theme','style']});" +
+                        "}catch(e){}" +
+                        "window.addEventListener('storage',function(e){if(e.key==='theme')reportTheme();});" +
+                        "})();";
+                view.evaluateJavascript(themeObserver, null);
 
                 // 3. Inject bottom lifting style fix so bottom text and input area are comfortable and never cut off
                 String cssFix = "javascript:(function(){" +
