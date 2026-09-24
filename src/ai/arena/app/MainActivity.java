@@ -63,6 +63,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
     public static final int PERMISSION_REQUEST_MEDIA = 2001;
     public String suiteScript = "";
     public boolean isCurrentDark = false;
+    public boolean lastConfigNight = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -85,7 +86,21 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         }
 
         boolean isNight = isSystemNightMode();
+        this.lastConfigNight = isNight;
         this.isCurrentDark = isNight;
+
+        ComponentName launchedComp = getIntent() != null ? getIntent().getComponent() : null;
+        String className = launchedComp != null ? launchedComp.getClassName() : "";
+        boolean isLightAlias = className.contains("MainActivityLight");
+        boolean isDarkAlias = className.contains("MainActivityDark");
+
+        if ((isLightAlias && isNight) || (isDarkAlias && !isNight)) {
+            applyLauncherIconSetting(isNight);
+            finishAffinity();
+            return;
+        }
+
+        applyLauncherIconSetting(isNight);
 
         // Load userscript (prioritizes hot-updated script in filesDir over APK assets)
         suiteScript = loadCurrentScript();
@@ -185,7 +200,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
     }
 
     public boolean isSystemNightMode() {
-        int uiMode = getApplicationContext().getResources().getConfiguration().uiMode;
+        int uiMode = getResources().getConfiguration().uiMode;
         return (uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
     }
 
@@ -267,30 +282,39 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
         boolean isNight = (newConfig.uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
-        this.isCurrentDark = isNight;
+        if (isNight != this.lastConfigNight) {
+            this.lastConfigNight = isNight;
+            this.isCurrentDark = isNight;
+            applyLauncherIconSetting(isNight);
+            finishAffinity();
+            return;
+        }
         updateSystemBarsAndTheme(isNight);
     }
 
-    @Override
-    protected void onStop() {
-        super.onStop();
-        syncLauncherIcon();
-    }
-
-    public void syncLauncherIcon() {
+    public void applyLauncherIconSetting(boolean isNight) {
         try {
             PackageManager pm = getPackageManager();
             ComponentName lightComp = new ComponentName(this, "ai.arena.app.MainActivityLight");
             ComponentName darkComp = new ComponentName(this, "ai.arena.app.MainActivityDark");
 
-            int targetLightState = isCurrentDark ? PackageManager.COMPONENT_ENABLED_STATE_DISABLED : PackageManager.COMPONENT_ENABLED_STATE_ENABLED;
-            int targetDarkState = isCurrentDark ? PackageManager.COMPONENT_ENABLED_STATE_ENABLED : PackageManager.COMPONENT_ENABLED_STATE_DISABLED;
+            int targetLightState = isNight ? PackageManager.COMPONENT_ENABLED_STATE_DISABLED : PackageManager.COMPONENT_ENABLED_STATE_ENABLED;
+            int targetDarkState = isNight ? PackageManager.COMPONENT_ENABLED_STATE_ENABLED : PackageManager.COMPONENT_ENABLED_STATE_DISABLED;
 
-            if (pm.getComponentEnabledSetting(lightComp) != targetLightState) {
-                pm.setComponentEnabledSetting(lightComp, targetLightState, PackageManager.DONT_KILL_APP);
-            }
-            if (pm.getComponentEnabledSetting(darkComp) != targetDarkState) {
-                pm.setComponentEnabledSetting(darkComp, targetDarkState, PackageManager.DONT_KILL_APP);
+            if (isNight) {
+                if (pm.getComponentEnabledSetting(darkComp) != targetDarkState) {
+                    pm.setComponentEnabledSetting(darkComp, targetDarkState, PackageManager.DONT_KILL_APP);
+                }
+                if (pm.getComponentEnabledSetting(lightComp) != targetLightState) {
+                    pm.setComponentEnabledSetting(lightComp, targetLightState, PackageManager.DONT_KILL_APP);
+                }
+            } else {
+                if (pm.getComponentEnabledSetting(lightComp) != targetLightState) {
+                    pm.setComponentEnabledSetting(lightComp, targetLightState, PackageManager.DONT_KILL_APP);
+                }
+                if (pm.getComponentEnabledSetting(darkComp) != targetDarkState) {
+                    pm.setComponentEnabledSetting(darkComp, targetDarkState, PackageManager.DONT_KILL_APP);
+                }
             }
         } catch (Throwable t) {
             t.printStackTrace();
