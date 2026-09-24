@@ -51,7 +51,8 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         super.onCreate(savedInstanceState);
 
         // Synchronize launcher icon based on current system Dark/Light theme
-        checkAndSyncLauncherIcon();
+        boolean isNight = isSystemNightMode();
+        checkAndSyncLauncherIcon(isNight);
 
         // Load userscript from assets
         suiteScript = loadAssetScript("arena_suite.js");
@@ -84,7 +85,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         setContentView(rootLayout);
 
         // Apply dark/light status bar & navigation bar colors
-        updateSystemBarsAndTheme();
+        updateSystemBarsAndTheme(isNight);
 
         // Configure modern WebSettings
         WebSettings settings = webView.getSettings();
@@ -103,9 +104,9 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         settings.setDisplayZoomControls(false);
         settings.setSafeBrowsingEnabled(true);
 
-        // Modern Android 13+ algorithmic darkening
+        // Modern Android 13+ algorithmic darkening - only allowed in dark mode
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            settings.setAlgorithmicDarkeningAllowed(true);
+            settings.setAlgorithmicDarkeningAllowed(isNight);
         }
 
         // Configure modern Chrome Mobile User Agent (Android 14 Chrome 128+)
@@ -124,7 +125,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         cookieManager.setAcceptThirdPartyCookies(webView, true);
 
         // Set Clients
-        webView.setWebViewClient(new ArenaWebViewClient(suiteScript));
+        webView.setWebViewClient(new ArenaWebViewClient(this, suiteScript));
         webView.setWebChromeClient(new ArenaWebChromeClient(this));
 
         // Modern Android 13/14+ Predictive Back Navigation
@@ -139,6 +140,11 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         webView.loadUrl("https://arena.ai");
     }
 
+    public boolean isSystemNightMode() {
+        int uiMode = getApplicationContext().getResources().getConfiguration().uiMode;
+        return (uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+    }
+
     @Override
     public WindowInsets onApplyWindowInsets(View v, WindowInsets insets) {
         android.graphics.Insets navInsets = insets.getInsets(
@@ -151,19 +157,20 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
     @Override
     protected void onResume() {
         super.onResume();
-        updateSystemBarsAndTheme();
-        checkAndSyncLauncherIcon();
+        boolean isNight = isSystemNightMode();
+        updateSystemBarsAndTheme(isNight);
+        checkAndSyncLauncherIcon(isNight);
     }
 
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
-        updateSystemBarsAndTheme();
-        checkAndSyncLauncherIcon();
+        boolean isNight = (newConfig.uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+        updateSystemBarsAndTheme(isNight);
+        checkAndSyncLauncherIcon(isNight);
     }
 
-    private void updateSystemBarsAndTheme() {
-        boolean isNight = (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+    public void updateSystemBarsAndTheme(boolean isNight) {
         int themeColor = isNight ? Color.parseColor("#111113") : Color.parseColor("#FFFFFF");
 
         Window window = getWindow();
@@ -188,24 +195,51 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
 
         if (webView != null) {
             webView.setBackgroundColor(themeColor);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                webView.getSettings().setAlgorithmicDarkeningAllowed(isNight);
+            }
+            syncWebPageTheme(isNight);
         }
     }
 
-    private void checkAndSyncLauncherIcon() {
+    public void syncWebPageTheme(boolean isNight) {
+        if (webView == null) return;
+        String js = String.format(
+            "javascript:(function(){" +
+            "var isDark = %b;" +
+            "var d = document.documentElement;" +
+            "var target = isDark ? 'dark' : 'light';" +
+            "var remove = isDark ? 'light' : 'dark';" +
+            "if(d){" +
+            "  d.classList.remove(remove);" +
+            "  d.classList.add(target);" +
+            "  d.style.colorScheme = target;" +
+            "  if(d.dataset) d.dataset.theme = target;" +
+            "}" +
+            "try{localStorage.setItem('theme', target);}catch(e){}" +
+            "try{window.dispatchEvent(new StorageEvent('storage',{key:'theme',newValue:target}));}catch(e){}" +
+            "})();",
+            isNight
+        );
+        webView.evaluateJavascript(js, null);
+    }
+
+    public void checkAndSyncLauncherIcon(boolean isNight) {
         try {
-            boolean isNight = (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
             PackageManager pm = getPackageManager();
             ComponentName lightComponent = new ComponentName(this, "ai.arena.app.MainActivityLight");
             ComponentName darkComponent = new ComponentName(this, "ai.arena.app.MainActivityDark");
 
-            int currentLightState = pm.getComponentEnabledSetting(lightComponent);
+            int curLight = pm.getComponentEnabledSetting(lightComponent);
+            int curDark = pm.getComponentEnabledSetting(darkComponent);
+
             if (isNight) {
-                if (currentLightState != PackageManager.COMPONENT_ENABLED_STATE_DISABLED) {
+                if (curDark != PackageManager.COMPONENT_ENABLED_STATE_ENABLED || curLight != PackageManager.COMPONENT_ENABLED_STATE_DISABLED) {
                     pm.setComponentEnabledSetting(darkComponent, PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP);
                     pm.setComponentEnabledSetting(lightComponent, PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP);
                 }
             } else {
-                if (currentLightState != PackageManager.COMPONENT_ENABLED_STATE_ENABLED && currentLightState != PackageManager.COMPONENT_ENABLED_STATE_DEFAULT) {
+                if (curLight != PackageManager.COMPONENT_ENABLED_STATE_ENABLED || curDark != PackageManager.COMPONENT_ENABLED_STATE_DISABLED) {
                     pm.setComponentEnabledSetting(lightComponent, PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP);
                     pm.setComponentEnabledSetting(darkComponent, PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP);
                 }
@@ -225,15 +259,22 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
     }
 
     public static class ArenaWebViewClient extends WebViewClient {
+        private final MainActivity activity;
         private final String suiteScript;
 
-        public ArenaWebViewClient(String suiteScript) {
+        public ArenaWebViewClient(MainActivity activity, String suiteScript) {
+            this.activity = activity;
             this.suiteScript = suiteScript;
         }
 
         private void tryInject(WebView view, String url) {
             if (url != null && (url.contains("arena.ai") || url.contains("lmsys.org"))) {
-                // 1. Inject bottom lifting style fix so bottom text and input area are comfortable and never cut off
+                // 1. Sync light/dark theme according to system
+                if (activity != null) {
+                    activity.syncWebPageTheme(activity.isSystemNightMode());
+                }
+
+                // 2. Inject bottom lifting style fix so bottom text and input area are comfortable and never cut off
                 String cssFix = "javascript:(function(){" +
                         "if(!document.getElementById('__arena_mobile_bottom_fix__')){" +
                         "var st=document.createElement('style');" +
@@ -247,7 +288,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                         "}})();";
                 view.evaluateJavascript(cssFix, null);
 
-                // 2. Inject userscript
+                // 3. Inject userscript
                 if (suiteScript != null && !suiteScript.isEmpty()) {
                     view.evaluateJavascript(suiteScript, null);
                 }
