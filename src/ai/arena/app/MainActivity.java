@@ -58,7 +58,9 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
     public ProgressBar progressBar;
     @SuppressWarnings("rawtypes")
     public ValueCallback uploadMessage;
+    public WebChromeClient.FileChooserParams pendingChooserParams;
     public static final int FILECHOOSER_RESULTCODE = 1001;
+    public static final int PERMISSION_REQUEST_MEDIA = 2001;
     public String suiteScript = "";
 
     @Override
@@ -611,75 +613,43 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         @Override
         public boolean onShowFileChooser(WebView webView, ValueCallback filePathCallback,
                                          FileChooserParams fileChooserParams) {
+            if (activity == null) return false;
+
             if (activity.uploadMessage != null) {
                 activity.uploadMessage.onReceiveValue(null);
                 activity.uploadMessage = null;
             }
             activity.uploadMessage = filePathCallback;
+            activity.pendingChooserParams = fileChooserParams;
 
-            Intent chooserIntent = null;
-            try {
-                // 1. Primary intent from fileChooserParams (handles all files)
-                Intent contentIntent = fileChooserParams != null ? fileChooserParams.createIntent() : null;
-                if (contentIntent == null) {
-                    contentIntent = new Intent(Intent.ACTION_GET_CONTENT);
-                    contentIntent.addCategory(Intent.CATEGORY_OPENABLE);
-                    contentIntent.setType("*/*");
+            // Check if media permissions need to be requested dynamically from the user
+            List<String> neededPermissions = new ArrayList<>();
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                if (activity.checkSelfPermission(android.Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED) {
+                    neededPermissions.add(android.Manifest.permission.READ_MEDIA_IMAGES);
                 }
-                contentIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                if (fileChooserParams != null && fileChooserParams.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE) {
-                    contentIntent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                if (activity.checkSelfPermission(android.Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED) {
+                    neededPermissions.add(android.Manifest.permission.READ_MEDIA_VIDEO);
                 }
-
-                // 2. Extra initial intents (Native Gallery & Modern Photo Picker)
-                List<Intent> extraIntents = new ArrayList<>();
-
-                // Native Gallery picker (broad compatibility with Xiaomi, Huawei, Oppo, Vivo, Samsung)
-                try {
-                    Intent galleryIntent = new Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
-                    galleryIntent.setType("image/*");
-                    galleryIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                    if (fileChooserParams != null && fileChooserParams.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE) {
-                        galleryIntent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    if (activity.checkSelfPermission(android.Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED) != PackageManager.PERMISSION_GRANTED) {
+                        neededPermissions.add(android.Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED);
                     }
-                    extraIntents.add(galleryIntent);
-                } catch (Throwable ignored) {}
-
-                // Android 13+ (API 33) Modern Photo Picker
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    try {
-                        Intent photoPickerIntent = new Intent(MediaStore.ACTION_PICK_IMAGES);
-                        photoPickerIntent.setType("image/*");
-                        photoPickerIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                        if (fileChooserParams != null && fileChooserParams.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE) {
-                            photoPickerIntent.putExtra(MediaStore.EXTRA_PICK_IMAGES_MAX, MediaStore.getPickImagesMaxLimit());
-                        }
-                        extraIntents.add(photoPickerIntent);
-                    } catch (Throwable ignored) {}
                 }
-
-                chooserIntent = Intent.createChooser(contentIntent, "选择图片或文件");
-                if (!extraIntents.isEmpty()) {
-                    chooserIntent.putExtra(Intent.EXTRA_INITIAL_INTENTS, extraIntents.toArray(new Intent[0]));
+            } else {
+                if (activity.checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                    neededPermissions.add(android.Manifest.permission.READ_EXTERNAL_STORAGE);
                 }
-            } catch (Exception e) {
-                Intent fallback = new Intent(Intent.ACTION_GET_CONTENT);
-                fallback.addCategory(Intent.CATEGORY_OPENABLE);
-                fallback.setType("*/*");
-                fallback.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
-                fallback.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                chooserIntent = Intent.createChooser(fallback, "选择图片或文件");
             }
 
-            try {
-                activity.startActivityForResult(chooserIntent, FILECHOOSER_RESULTCODE);
-            } catch (Exception e) {
-                if (activity.uploadMessage != null) {
-                    activity.uploadMessage.onReceiveValue(null);
-                    activity.uploadMessage = null;
-                }
-                return false;
+            if (!neededPermissions.isEmpty()) {
+                // Explicitly send runtime permission request to user via system dialog
+                activity.requestPermissions(neededPermissions.toArray(new String[0]), PERMISSION_REQUEST_MEDIA);
+                return true;
             }
+
+            // Permissions already granted, launch chooser directly
+            activity.launchFileChooser(fileChooserParams);
             return true;
         }
 
@@ -938,6 +908,83 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         try {
             getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
         } catch (Throwable ignored) {}
+    }
+
+    public void launchFileChooser(WebChromeClient.FileChooserParams fileChooserParams) {
+        Intent chooserIntent = null;
+        try {
+            // 1. Primary intent from fileChooserParams (handles all files)
+            Intent contentIntent = fileChooserParams != null ? fileChooserParams.createIntent() : null;
+            if (contentIntent == null) {
+                contentIntent = new Intent(Intent.ACTION_GET_CONTENT);
+                contentIntent.addCategory(Intent.CATEGORY_OPENABLE);
+                contentIntent.setType("*/*");
+            }
+            contentIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            if (fileChooserParams != null && fileChooserParams.getMode() == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE) {
+                contentIntent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+            }
+
+            // 2. Extra initial intents (Native Gallery & Modern Photo Picker)
+            List<Intent> extraIntents = new ArrayList<>();
+
+            // Native Gallery picker (broad compatibility with Xiaomi, Huawei, Oppo, Vivo, Samsung)
+            try {
+                Intent galleryIntent = new Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
+                galleryIntent.setType("image/*");
+                galleryIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                if (fileChooserParams != null && fileChooserParams.getMode() == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE) {
+                    galleryIntent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                }
+                extraIntents.add(galleryIntent);
+            } catch (Throwable ignored) {}
+
+            // Android 13+ (API 33) Modern Photo Picker
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                try {
+                    Intent photoPickerIntent = new Intent(MediaStore.ACTION_PICK_IMAGES);
+                    photoPickerIntent.setType("image/*");
+                    photoPickerIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    if (fileChooserParams != null && fileChooserParams.getMode() == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE) {
+                        photoPickerIntent.putExtra(MediaStore.EXTRA_PICK_IMAGES_MAX, MediaStore.getPickImagesMaxLimit());
+                    }
+                    extraIntents.add(photoPickerIntent);
+                } catch (Throwable ignored) {}
+            }
+
+            chooserIntent = Intent.createChooser(contentIntent, "选择图片或文件");
+            if (!extraIntents.isEmpty()) {
+                chooserIntent.putExtra(Intent.EXTRA_INITIAL_INTENTS, extraIntents.toArray(new Intent[0]));
+            }
+        } catch (Exception e) {
+            Intent fallback = new Intent(Intent.ACTION_GET_CONTENT);
+            fallback.addCategory(Intent.CATEGORY_OPENABLE);
+            fallback.setType("*/*");
+            fallback.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+            fallback.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            chooserIntent = Intent.createChooser(fallback, "选择图片或文件");
+        }
+
+        try {
+            startActivityForResult(chooserIntent, FILECHOOSER_RESULTCODE);
+        } catch (Exception e) {
+            if (uploadMessage != null) {
+                uploadMessage.onReceiveValue(null);
+                uploadMessage = null;
+            }
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        if (requestCode == PERMISSION_REQUEST_MEDIA) {
+            if (uploadMessage != null) {
+                launchFileChooser(pendingChooserParams);
+                pendingChooserParams = null;
+            }
+        } else {
+            super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        }
     }
 
     @Override
