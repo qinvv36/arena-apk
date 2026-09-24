@@ -83,9 +83,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
             t.printStackTrace();
         }
 
-        // Synchronize launcher icon based on current system Dark/Light theme
         boolean isNight = isSystemNightMode();
-        checkAndSyncLauncherIcon(isNight);
 
         // Load userscript (prioritizes hot-updated script in filesDir over APK assets)
         suiteScript = loadCurrentScript();
@@ -263,7 +261,6 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         applyFullScreen();
         boolean isNight = isSystemNightMode();
         updateSystemBarsAndTheme(isNight);
-        checkAndSyncLauncherIcon(isNight);
     }
 
     @Override
@@ -271,7 +268,6 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         super.onConfigurationChanged(newConfig);
         boolean isNight = (newConfig.uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
         updateSystemBarsAndTheme(isNight);
-        checkAndSyncLauncherIcon(isNight);
     }
 
     public void updateSystemBarsAndTheme(boolean isNight) {
@@ -339,31 +335,6 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
             isNight
         );
         webView.evaluateJavascript(js, null);
-    }
-
-    public void checkAndSyncLauncherIcon(boolean isNight) {
-        try {
-            PackageManager pm = getPackageManager();
-            ComponentName lightComponent = new ComponentName(this, "ai.arena.app.MainActivityLight");
-            ComponentName darkComponent = new ComponentName(this, "ai.arena.app.MainActivityDark");
-
-            int curLight = pm.getComponentEnabledSetting(lightComponent);
-            int curDark = pm.getComponentEnabledSetting(darkComponent);
-
-            if (isNight) {
-                if (curDark != PackageManager.COMPONENT_ENABLED_STATE_ENABLED || curLight != PackageManager.COMPONENT_ENABLED_STATE_DISABLED) {
-                    pm.setComponentEnabledSetting(darkComponent, PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP);
-                    pm.setComponentEnabledSetting(lightComponent, PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP);
-                }
-            } else {
-                if (curLight != PackageManager.COMPONENT_ENABLED_STATE_ENABLED || curDark != PackageManager.COMPONENT_ENABLED_STATE_DISABLED) {
-                    pm.setComponentEnabledSetting(lightComponent, PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP);
-                    pm.setComponentEnabledSetting(darkComponent, PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP);
-                }
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
     }
 
     @Override
@@ -600,7 +571,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                     "window.__arena_ptr_initialized__=true;" +
                     "var style=document.createElement('style');" +
                     "style.id='__arena_ptr_style__';" +
-                    "style.textContent='body{position:relative !important;will-change:transform;}#__arena_ptr_tray__{position:absolute;top:-300px;left:0;width:100%;height:300px;display:flex;align-items:flex-end;justify-content:center;box-sizing:border-box;pointer-events:none;z-index:999999;background-color:#ffffff;color:#64748b;border-bottom:1px solid rgba(0,0,0,0.06);}html.dark #__arena_ptr_tray__,html[data-theme=\"dark\"] #__arena_ptr_tray__,[data-theme=\"dark\"] #__arena_ptr_tray__,body.dark #__arena_ptr_tray__{background-color:#111113;color:#94a3b8;border-bottom:1px solid rgba(255,255,255,0.08);}@media(prefers-color-scheme:dark){#__arena_ptr_tray__{background-color:#111113;color:#94a3b8;border-bottom:1px solid rgba(255,255,255,0.08);}}#__arena_ptr_tray__ .ptr-inner{display:flex;align-items:center;justify-content:center;gap:8px;height:52px;padding:0 16px;}#__arena_ptr_tray__ .ptr-icon-box{width:20px;height:20px;display:flex;align-items:center;justify-content:center;}#__arena_ptr_tray__ .ptr-arrow{transition:transform .2s ease;transform-origin:center;display:block;}#__arena_ptr_tray__ .ptr-spinner{display:none;animation:ptr-spin .75s linear infinite;transform-origin:center;}#__arena_ptr_tray__.ptr-ready .ptr-arrow{transform:rotate(180deg);color:#10b981;}#__arena_ptr_tray__.ptr-ready .ptr-label{color:#10b981;}#__arena_ptr_tray__.ptr-refreshing .ptr-arrow{display:none;}#__arena_ptr_tray__.ptr-refreshing .ptr-spinner{display:block;color:#3b82f6;}#__arena_ptr_tray__.ptr-refreshing .ptr-label{color:#3b82f6;}#__arena_ptr_tray__ .ptr-label{font-size:13px;font-weight:500;letter-spacing:0.02em;}@keyframes ptr-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}';" +
+                    "style.textContent='body{position:relative !important;will-change:transform;}#__arena_ptr_tray__{position:absolute;top:-300px;left:0;width:100%;height:300px;display:flex;align-items:flex-end;justify-content:center;box-sizing:border-box;pointer-events:none;z-index:999999;background-color:#ffffff;color:#6b7280;border-bottom:1px solid rgba(0,0,0,0.07);}html.dark #__arena_ptr_tray__,html[data-theme=\"dark\"] #__arena_ptr_tray__,[data-theme=\"dark\"] #__arena_ptr_tray__,body.dark #__arena_ptr_tray__{background-color:#111113;color:#9ca3af;border-bottom:1px solid rgba(255,255,255,0.08);}@media(prefers-color-scheme:dark){#__arena_ptr_tray__{background-color:#111113;color:#9ca3af;border-bottom:1px solid rgba(255,255,255,0.08);}}#__arena_ptr_tray__ .ptr-inner{display:flex;align-items:center;justify-content:center;gap:8px;height:52px;padding:0 16px;}#__arena_ptr_tray__ .ptr-icon-box{width:20px;height:20px;display:flex;align-items:center;justify-content:center;}#__arena_ptr_tray__ .ptr-arrow{transition:transform .2s ease;transform-origin:center;display:block;color:inherit;}#__arena_ptr_tray__ .ptr-spinner{display:none;animation:ptr-spin .75s linear infinite;transform-origin:center;color:inherit;}#__arena_ptr_tray__.ptr-ready{color:#1f2937;}html.dark #__arena_ptr_tray__.ptr-ready,html[data-theme=\"dark\"] #__arena_ptr_tray__.ptr-ready,[data-theme=\"dark\"] #__arena_ptr_tray__.ptr-ready,body.dark #__arena_ptr_tray__.ptr-ready{color:#e5e7eb;}@media(prefers-color-scheme:dark){#__arena_ptr_tray__.ptr-ready{color:#e5e7eb;}}#__arena_ptr_tray__.ptr-ready .ptr-arrow{transform:rotate(180deg);}#__arena_ptr_tray__.ptr-refreshing{color:#374151;}html.dark #__arena_ptr_tray__.ptr-refreshing,html[data-theme=\"dark\"] #__arena_ptr_tray__.ptr-refreshing,[data-theme=\"dark\"] #__arena_ptr_tray__.ptr-refreshing,body.dark #__arena_ptr_tray__.ptr-refreshing{color:#d1d5db;}@media(prefers-color-scheme:dark){#__arena_ptr_tray__.ptr-refreshing{color:#d1d5db;}}#__arena_ptr_tray__.ptr-refreshing .ptr-arrow{display:none;}#__arena_ptr_tray__.ptr-refreshing .ptr-spinner{display:block;}#__arena_ptr_tray__ .ptr-label{font-size:13px;font-weight:500;letter-spacing:0.02em;color:inherit;}@keyframes ptr-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}';" +
                     "(document.head||document.documentElement).appendChild(style);" +
                     "function getTray(){" +
                     "  var t=document.getElementById('__arena_ptr_tray__');" +
