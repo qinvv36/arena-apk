@@ -419,6 +419,27 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         }
     }
 
+    public static class WebReloadRunnable implements Runnable {
+        private final MainActivity activity;
+
+        public WebReloadRunnable(MainActivity activity) {
+            this.activity = activity;
+        }
+
+        @Override
+        public void run() {
+            if (activity != null) {
+                if (activity.progressBar != null) {
+                    activity.progressBar.setVisibility(View.VISIBLE);
+                    activity.progressBar.setProgress(15);
+                }
+                if (activity.webView != null) {
+                    activity.webView.reload();
+                }
+            }
+        }
+    }
+
     public static class AndroidBridge {
         private final MainActivity activity;
 
@@ -430,6 +451,13 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         public void requestInputFocus() {
             if (activity != null) {
                 activity.runOnUiThread(activity);
+            }
+        }
+
+        @JavascriptInterface
+        public void reloadPage() {
+            if (activity != null) {
+                activity.runOnUiThread(new WebReloadRunnable(activity));
             }
         }
 
@@ -563,16 +591,114 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
             }
         }
 
+        private void injectPullToRefresh(WebView view) {
+            String ptrScript = "javascript:(function(){" +
+                    "if(window.__arena_ptr_initialized__)return;" +
+                    "window.__arena_ptr_initialized__=true;" +
+                    "var el=document.createElement('div');" +
+                    "el.id='__arena_pull_refresh__';" +
+                    "el.innerHTML='<div class=\"ptr-circle\">" +
+                    "<svg class=\"ptr-icon\" viewBox=\"0 0 24 24\" width=\"22\" height=\"22\">" +
+                    "<circle class=\"ptr-track\" cx=\"12\" cy=\"12\" r=\"9\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" opacity=\"0.2\"/>" +
+                    "<path class=\"ptr-arc\" d=\"M12 3 a 9 9 0 0 1 0 18 a 9 9 0 0 1 0 -18\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\"/>" +
+                    "</svg></div>" +
+                    "<style>" +
+                    "#__arena_pull_refresh__{position:fixed;top:14px;left:50%;transform:translate3d(-50%,-70px,0);z-index:999999;pointer-events:none;transition:transform .25s cubic-bezier(.2,.9,.3,1),opacity .2s ease;opacity:0;will-change:transform,opacity;}" +
+                    "#__arena_pull_refresh__ .ptr-circle{width:40px;height:40px;border-radius:50%;background:#ffffff;color:#2f6fed;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 14px rgba(0,0,0,.16),0 1px 3px rgba(0,0,0,.08);border:1px solid rgba(0,0,0,.06);}" +
+                    "html.dark #__arena_pull_refresh__ .ptr-circle,html[data-theme=\"dark\"] #__arena_pull_refresh__ .ptr-circle,[data-theme=\"dark\"] #__arena_pull_refresh__ .ptr-circle{background:#232326;color:#e4dfd6;border-color:rgba(255,255,255,.1);box-shadow:0 4px 16px rgba(0,0,0,.4);}" +
+                    "#__arena_pull_refresh__.ptr-ready .ptr-circle{color:#10b981;}" +
+                    "#__arena_pull_refresh__.ptr-spinning .ptr-icon{animation:ptr-spin .75s linear infinite;}" +
+                    "@keyframes ptr-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}" +
+                    "</style>\\n';" +
+                    "(document.body||document.documentElement).appendChild(el);" +
+                    "function isAtTop(){" +
+                    "  if(window.scrollY>2)return false;" +
+                    "  if(document.documentElement&&document.documentElement.scrollTop>2)return false;" +
+                    "  if(document.body&&document.body.scrollTop>2)return false;" +
+                    "  var m=document.querySelector('main');if(m&&m.scrollTop>2)return false;" +
+                    "  var scs=document.querySelectorAll('.overflow-y-auto,.overflow-auto');" +
+                    "  for(var i=0;i<scs.length;i++){" +
+                    "    if(!scs[i].closest('aside,[data-sidebar]')&&scs[i].scrollTop>2)return false;" +
+                    "  }" +
+                    "  return true;" +
+                    "}" +
+                    "var startY=0,startX=0,pulling=false,currentPull=0,THRESHOLD=55;" +
+                    "document.addEventListener('touchstart',function(e){" +
+                    "  if(!e.touches||e.touches.length!==1)return;" +
+                    "  var t=e.target;" +
+                    "  if(t&&t.closest&&(t.closest('input,textarea,[contenteditable=\"true\"],aside,[data-sidebar]')))return;" +
+                    "  if(!isAtTop())return;" +
+                    "  startY=e.touches[0].clientY;startX=e.touches[0].clientX;pulling=false;currentPull=0;" +
+                    "},{passive:true});" +
+                    "document.addEventListener('touchmove',function(e){" +
+                    "  if(!e.touches||e.touches.length!==1)return;" +
+                    "  if(startY===0)return;" +
+                    "  if(!isAtTop()){if(pulling)reset();return;}" +
+                    "  var y=e.touches[0].clientY,x=e.touches[0].clientX,dy=y-startY,dx=x-startX;" +
+                    "  if(!pulling){" +
+                    "    if(dy>10&&dy>Math.abs(dx)*1.2){pulling=true;}else if(Math.abs(dx)>dy||dy<0){startY=0;return;}" +
+                    "  }" +
+                    "  if(pulling){" +
+                    "    if(e.cancelable)e.preventDefault();" +
+                    "    currentPull=Math.min(100,Math.pow(Math.max(0,dy),0.85));" +
+                    "    el.style.transition='none';" +
+                    "    el.style.transform='translate3d(-50%,'+(currentPull-60)+'px,0)';" +
+                    "    el.style.opacity=Math.min(1,currentPull/35).toString();" +
+                    "    var icon=el.querySelector('.ptr-icon');" +
+                    "    if(icon)icon.style.transform='rotate('+(currentPull*4.5)+'deg)';" +
+                    "    if(currentPull>=THRESHOLD){el.classList.add('ptr-ready');}else{el.classList.remove('ptr-ready');}" +
+                    "  }" +
+                    "},{passive:false});" +
+                    "function reset(){" +
+                    "  pulling=false;startY=0;currentPull=0;" +
+                    "  el.style.transition='transform .25s cubic-bezier(.2,.9,.3,1), opacity .2s ease';" +
+                    "  el.style.transform='translate3d(-50%,-70px,0)';" +
+                    "  el.style.opacity='0';" +
+                    "  el.classList.remove('ptr-ready','ptr-spinning');" +
+                    "}" +
+                    "document.addEventListener('touchend',function(e){" +
+                    "  if(!pulling){startY=0;return;}" +
+                    "  if(currentPull>=THRESHOLD){" +
+                    "    el.style.transition='transform .2s ease, opacity .2s ease';" +
+                    "    el.style.transform='translate3d(-50%,16px,0)';" +
+                    "    el.style.opacity='1';" +
+                    "    el.classList.remove('ptr-ready');" +
+                    "    el.classList.add('ptr-spinning');" +
+                    "    pulling=false;startY=0;" +
+                    "    setTimeout(function(){" +
+                    "      if(window.AndroidBridge&&window.AndroidBridge.reloadPage){window.AndroidBridge.reloadPage();}" +
+                    "      else{location.reload();}" +
+                    "    },120);" +
+                    "  }else{reset();}" +
+                    "},{passive:true});" +
+                    "document.addEventListener('touchcancel',reset,{passive:true});" +
+                    "})();";
+            view.evaluateJavascript(ptrScript, null);
+        }
+
+        private void resetPullToRefresh(WebView view) {
+            if (view == null) return;
+            view.evaluateJavascript(
+                "javascript:(function(){" +
+                "var el=document.getElementById('__arena_pull_refresh__');" +
+                "if(el){el.style.transform='translate3d(-50%,-70px,0)';el.style.opacity='0';el.classList.remove('ptr-ready','ptr-spinning');}" +
+                "})();", null
+            );
+        }
+
         @Override
         public void onPageStarted(WebView view, String url, Bitmap favicon) {
             super.onPageStarted(view, url, favicon);
             tryInject(view, url);
+            injectPullToRefresh(view);
         }
 
         @Override
         public void onPageFinished(WebView view, String url) {
             super.onPageFinished(view, url);
             tryInject(view, url);
+            injectPullToRefresh(view);
+            resetPullToRefresh(view);
         }
 
         @Override
@@ -601,6 +727,14 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         public void onProgressChanged(WebView view, int newProgress) {
             if (newProgress >= 100) {
                 activity.progressBar.setVisibility(View.GONE);
+                if (view != null) {
+                    view.evaluateJavascript(
+                        "javascript:(function(){" +
+                        "var el=document.getElementById('__arena_pull_refresh__');" +
+                        "if(el){el.style.transform='translate3d(-50%,-70px,0)';el.style.opacity='0';el.classList.remove('ptr-ready','ptr-spinning');}" +
+                        "})();", null
+                    );
+                }
             } else {
                 if (activity.progressBar.getVisibility() == View.GONE) {
                     activity.progressBar.setVisibility(View.VISIBLE);
