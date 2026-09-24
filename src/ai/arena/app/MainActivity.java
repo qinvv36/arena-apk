@@ -8,19 +8,23 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Message;
 import android.provider.MediaStore;
+import android.util.TypedValue;
 import java.util.ArrayList;
 import java.util.List;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowInsets;
@@ -36,7 +40,9 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.TextView;
 import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
 
@@ -56,6 +62,26 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
 
     public WebView webView;
     public ProgressBar progressBar;
+    public LinearLayout ptrHeaderView;
+    public TextView ptrArrowView;
+    public ProgressBar ptrSpinnerView;
+    public TextView ptrLabelView;
+    public View ptrBorderView;
+    public float density = 3.0f;
+    public int ptrHeaderHeightPx = 480;
+    public float ptrThresholdPx = 168f;
+    public float ptrMaxPullPx = 390f;
+    public float ptrRefreshHoldPx = 156f;
+    public float ptrTouchSlop = 24f;
+    public float ptrDownX = 0f;
+    public float ptrDownY = 0f;
+    public float ptrPullStartY = 0f;
+    public float ptrCurrentPullPx = 0f;
+    public boolean ptrIsPulling = false;
+    public boolean ptrIgnoreGesture = false;
+    public boolean ptrIsRefreshing = false;
+    public volatile boolean webViewCanPull = true;
+
     @SuppressWarnings("rawtypes")
     public ValueCallback uploadMessage;
     public WebChromeClient.FileChooserParams pendingChooserParams;
@@ -103,6 +129,14 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         // Load userscript (prioritizes hot-updated script in filesDir over APK assets)
         suiteScript = loadCurrentScript();
 
+        density = getResources().getDisplayMetrics().density;
+        if (density <= 0f) density = 3.0f;
+        ptrHeaderHeightPx = Math.round(180f * density);
+        ptrThresholdPx = 56f * density;
+        ptrMaxPullPx = 132f * density;
+        ptrRefreshHoldPx = 52f * density;
+        ptrTouchSlop = Math.max(ViewConfiguration.get(this).getScaledTouchSlop(), Math.round(8f * density));
+
         // Root container
         FrameLayout rootLayout = new FrameLayout(this);
         rootLayout.setLayoutParams(new ViewGroup.LayoutParams(
@@ -123,6 +157,56 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         webView.addJavascriptInterface(new AndroidBridge(this), "AndroidBridge");
         webView.setOnTouchListener(this);
         rootLayout.addView(webView);
+
+        // Native Pull-To-Refresh Header (sinks together with WebView from top edge)
+        ptrHeaderView = new LinearLayout(this);
+        ptrHeaderView.setOrientation(LinearLayout.VERTICAL);
+        ptrHeaderView.setGravity(Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        FrameLayout.LayoutParams ptrParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ptrHeaderHeightPx);
+        ptrParams.gravity = Gravity.TOP;
+        ptrHeaderView.setLayoutParams(ptrParams);
+        ptrHeaderView.setTranslationY(-ptrHeaderHeightPx);
+
+        LinearLayout ptrRow = new LinearLayout(this);
+        ptrRow.setOrientation(LinearLayout.HORIZONTAL);
+        ptrRow.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, Math.round(52f * density));
+        ptrRow.setLayoutParams(rowParams);
+
+        ptrArrowView = new TextView(this);
+        ptrArrowView.setText("↓");
+        ptrArrowView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f);
+        ptrArrowView.setTypeface(Typeface.DEFAULT_BOLD);
+        ptrArrowView.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams arrowParams = new LinearLayout.LayoutParams(
+                Math.round(20f * density), Math.round(20f * density));
+        ptrArrowView.setLayoutParams(arrowParams);
+        ptrRow.addView(ptrArrowView);
+
+        ptrSpinnerView = new ProgressBar(this);
+        ptrSpinnerView.setIndeterminate(true);
+        ptrSpinnerView.setVisibility(View.GONE);
+        LinearLayout.LayoutParams spinnerParams = new LinearLayout.LayoutParams(
+                Math.round(16f * density), Math.round(16f * density));
+        ptrSpinnerView.setLayoutParams(spinnerParams);
+        ptrRow.addView(ptrSpinnerView);
+
+        ptrLabelView = new TextView(this);
+        ptrLabelView.setText("下拉刷新");
+        ptrLabelView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
+        ptrLabelView.setPadding(Math.round(8f * density), 0, 0, 0);
+        ptrRow.addView(ptrLabelView);
+
+        ptrHeaderView.addView(ptrRow);
+
+        ptrBorderView = new View(this);
+        ptrBorderView.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, Math.round(0.8f * density))));
+        ptrHeaderView.addView(ptrBorderView);
+
+        rootLayout.addView(ptrHeaderView);
 
         // Top horizontal progress bar
         progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
@@ -453,9 +537,180 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
             if (webView != null) {
                 webView.setBackgroundColor(themeColor);
             }
+            updatePtrHeaderTheme(isDark, ptrIsRefreshing || ptrCurrentPullPx >= ptrThresholdPx);
             applyFullScreen();
         } catch (Throwable t) {
             t.printStackTrace();
+        }
+    }
+
+    public void updatePtrHeaderTheme(boolean isDark, boolean isReadyOrRefreshing) {
+        if (ptrHeaderView == null) return;
+        int bgColor = isDark ? Color.parseColor("#111113") : Color.parseColor("#FFFFFF");
+        int borderColor = isDark ? Color.parseColor("#1AFFFFFF") : Color.parseColor("#14000000");
+        int fgColor;
+        if (isDark) {
+            fgColor = isReadyOrRefreshing ? Color.parseColor("#E5E7EB") : Color.parseColor("#9CA3AF");
+        } else {
+            fgColor = isReadyOrRefreshing ? Color.parseColor("#1F2937") : Color.parseColor("#6B7280");
+        }
+        ptrHeaderView.setBackgroundColor(bgColor);
+        if (ptrBorderView != null) {
+            ptrBorderView.setBackgroundColor(borderColor);
+        }
+        if (ptrArrowView != null) {
+            ptrArrowView.setTextColor(fgColor);
+        }
+        if (ptrLabelView != null) {
+            ptrLabelView.setTextColor(fgColor);
+        }
+        if (ptrSpinnerView != null) {
+            ptrSpinnerView.setIndeterminateTintList(ColorStateList.valueOf(fgColor));
+        }
+    }
+
+    public void resetNativePullToRefresh() {
+        ptrIsRefreshing = false;
+        ptrIsPulling = false;
+        ptrCurrentPullPx = 0f;
+        if (webView != null) {
+            webView.animate().translationY(0f).setDuration(240).start();
+        }
+        if (ptrHeaderView != null) {
+            ptrHeaderView.animate().translationY(-ptrHeaderHeightPx).setDuration(240).start();
+        }
+        if (ptrArrowView != null) {
+            ptrArrowView.setVisibility(View.VISIBLE);
+            ptrArrowView.setRotation(0f);
+        }
+        if (ptrSpinnerView != null) {
+            ptrSpinnerView.setVisibility(View.GONE);
+        }
+        if (ptrLabelView != null) {
+            ptrLabelView.setText("下拉刷新");
+        }
+        updatePtrHeaderTheme(isCurrentDark, false);
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent ev) {
+        if (ev == null || webView == null || ptrHeaderView == null) {
+            return super.dispatchTouchEvent(ev);
+        }
+        int action = ev.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN) {
+            ptrDownX = ev.getRawX();
+            ptrDownY = ev.getRawY();
+            ptrPullStartY = ptrDownY;
+            ptrIsPulling = false;
+            ptrCurrentPullPx = 0f;
+            ptrIgnoreGesture = ptrIsRefreshing || webView.canScrollVertically(-1);
+            if (!ptrIgnoreGesture) {
+                webViewCanPull = true;
+            }
+            return super.dispatchTouchEvent(ev);
+        }
+
+        if (action == MotionEvent.ACTION_POINTER_DOWN) {
+            if (ptrIsPulling) {
+                resetNativePullToRefresh();
+            }
+            ptrIgnoreGesture = true;
+            return super.dispatchTouchEvent(ev);
+        }
+
+        if (action == MotionEvent.ACTION_MOVE) {
+            if (ptrIgnoreGesture || ptrIsRefreshing) {
+                return super.dispatchTouchEvent(ev);
+            }
+            float dx = ev.getRawX() - ptrDownX;
+            float dy = ev.getRawY() - ptrDownY;
+
+            if (!ptrIsPulling) {
+                if (Math.abs(dx) > ptrTouchSlop && Math.abs(dx) > Math.abs(dy)) {
+                    ptrIgnoreGesture = true;
+                    return super.dispatchTouchEvent(ev);
+                }
+                if (dy < -ptrTouchSlop) {
+                    ptrIgnoreGesture = true;
+                    return super.dispatchTouchEvent(ev);
+                }
+                if (dy > ptrTouchSlop && dy > Math.abs(dx) * 1.25f) {
+                    if (webViewCanPull && !webView.canScrollVertically(-1)) {
+                        ptrIsPulling = true;
+                        ptrPullStartY = ev.getRawY();
+                        webView.animate().cancel();
+                        ptrHeaderView.animate().cancel();
+                        MotionEvent cancelEv = MotionEvent.obtain(ev);
+                        cancelEv.setAction(MotionEvent.ACTION_CANCEL);
+                        super.dispatchTouchEvent(cancelEv);
+                        cancelEv.recycle();
+                    } else {
+                        ptrIgnoreGesture = true;
+                        return super.dispatchTouchEvent(ev);
+                    }
+                }
+            }
+
+            if (ptrIsPulling) {
+                float rawPull = Math.max(0f, ev.getRawY() - ptrPullStartY);
+                float dampedDp = (float) (Math.pow(rawPull / density, 0.84) * 1.65);
+                ptrCurrentPullPx = Math.min(ptrMaxPullPx, dampedDp * density);
+                webView.setTranslationY(ptrCurrentPullPx);
+                ptrHeaderView.setTranslationY(ptrCurrentPullPx - ptrHeaderHeightPx);
+
+                boolean ready = ptrCurrentPullPx >= ptrThresholdPx;
+                if (ptrLabelView != null) {
+                    ptrLabelView.setText(ready ? "释放立即刷新" : "下拉刷新");
+                }
+                if (ptrArrowView != null) {
+                    float deg = Math.min(180f, (ptrCurrentPullPx / ptrThresholdPx) * 180f);
+                    ptrArrowView.setRotation(deg);
+                }
+                updatePtrHeaderTheme(isCurrentDark, ready);
+                return true;
+            }
+        }
+
+        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            if (ptrIsPulling) {
+                ptrIsPulling = false;
+                if (action == MotionEvent.ACTION_UP && ptrCurrentPullPx >= ptrThresholdPx) {
+                    ptrIsRefreshing = true;
+                    if (ptrArrowView != null) ptrArrowView.setVisibility(View.GONE);
+                    if (ptrSpinnerView != null) ptrSpinnerView.setVisibility(View.VISIBLE);
+                    if (ptrLabelView != null) ptrLabelView.setText("正在刷新...");
+                    updatePtrHeaderTheme(isCurrentDark, true);
+                    webView.animate().translationY(ptrRefreshHoldPx).setDuration(200).start();
+                    ptrHeaderView.animate().translationY(ptrRefreshHoldPx - ptrHeaderHeightPx).setDuration(200).start();
+                    if (progressBar != null) {
+                        progressBar.setVisibility(View.VISIBLE);
+                        progressBar.setProgress(15);
+                    }
+                    webView.reload();
+                    webView.postDelayed(new PtrResetRunnable(this), 6000);
+                } else {
+                    resetNativePullToRefresh();
+                }
+                return true;
+            }
+        }
+
+        return super.dispatchTouchEvent(ev);
+    }
+
+    public static class PtrResetRunnable implements Runnable {
+        private final MainActivity activity;
+
+        public PtrResetRunnable(MainActivity activity) {
+            this.activity = activity;
+        }
+
+        @Override
+        public void run() {
+            if (activity != null) {
+                activity.resetNativePullToRefresh();
+            }
         }
     }
 
@@ -558,6 +813,13 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
 
         public AndroidBridge(MainActivity activity) {
             this.activity = activity;
+        }
+
+        @JavascriptInterface
+        public void setCanPullToRefresh(boolean canPull) {
+            if (activity != null) {
+                activity.webViewCanPull = canPull;
+            }
         }
 
         @JavascriptInterface
@@ -732,148 +994,39 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
 
         private void injectPullToRefresh(WebView view) {
             String ptrScript = "javascript:(function(){" +
-                    "if(window.__arena_ptr_initialized__)return;" +
-                    "window.__arena_ptr_initialized__=true;" +
-                    "var style=document.createElement('style');" +
-                    "style.id='__arena_ptr_style__';" +
-                    "style.textContent='body{position:relative !important;will-change:transform;}#__arena_ptr_tray__{position:absolute;top:-300px;left:0;width:100%;height:300px;display:flex;align-items:flex-end;justify-content:center;box-sizing:border-box;pointer-events:none;z-index:999999;background-color:#ffffff;color:#6b7280;border-bottom:1px solid rgba(0,0,0,0.07);}html.dark #__arena_ptr_tray__,html[data-theme=\"dark\"] #__arena_ptr_tray__,[data-theme=\"dark\"] #__arena_ptr_tray__,body.dark #__arena_ptr_tray__{background-color:#111113;color:#9ca3af;border-bottom:1px solid rgba(255,255,255,0.08);}@media(prefers-color-scheme:dark){#__arena_ptr_tray__{background-color:#111113;color:#9ca3af;border-bottom:1px solid rgba(255,255,255,0.08);}}#__arena_ptr_tray__ .ptr-inner{display:flex;align-items:center;justify-content:center;gap:8px;height:52px;padding:0 16px;}#__arena_ptr_tray__ .ptr-icon-box{width:20px;height:20px;display:flex;align-items:center;justify-content:center;}#__arena_ptr_tray__ .ptr-arrow{transition:transform .2s ease;transform-origin:center;display:block;color:inherit;}#__arena_ptr_tray__ .ptr-spinner{display:none;animation:ptr-spin .75s linear infinite;transform-origin:center;color:inherit;}#__arena_ptr_tray__.ptr-ready{color:#1f2937;}html.dark #__arena_ptr_tray__.ptr-ready,html[data-theme=\"dark\"] #__arena_ptr_tray__.ptr-ready,[data-theme=\"dark\"] #__arena_ptr_tray__.ptr-ready,body.dark #__arena_ptr_tray__.ptr-ready{color:#e5e7eb;}@media(prefers-color-scheme:dark){#__arena_ptr_tray__.ptr-ready{color:#e5e7eb;}}#__arena_ptr_tray__.ptr-ready .ptr-arrow{transform:rotate(180deg);}#__arena_ptr_tray__.ptr-refreshing{color:#374151;}html.dark #__arena_ptr_tray__.ptr-refreshing,html[data-theme=\"dark\"] #__arena_ptr_tray__.ptr-refreshing,[data-theme=\"dark\"] #__arena_ptr_tray__.ptr-refreshing,body.dark #__arena_ptr_tray__.ptr-refreshing{color:#d1d5db;}@media(prefers-color-scheme:dark){#__arena_ptr_tray__.ptr-refreshing{color:#d1d5db;}}#__arena_ptr_tray__.ptr-refreshing .ptr-arrow{display:none;}#__arena_ptr_tray__.ptr-refreshing .ptr-spinner{display:block;}#__arena_ptr_tray__ .ptr-label{font-size:13px;font-weight:500;letter-spacing:0.02em;color:inherit;}@keyframes ptr-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}';" +
-                    "(document.head||document.documentElement).appendChild(style);" +
-                    "function getTray(){" +
-                    "  var t=document.getElementById('__arena_ptr_tray__');" +
-                    "  if(!t&&document.body){" +
-                    "    t=document.createElement('div');" +
-                    "    t.id='__arena_ptr_tray__';" +
-                    "    t.innerHTML='<div class=\"ptr-inner\"><div class=\"ptr-icon-box\"><svg class=\"ptr-arrow\" viewBox=\"0 0 24 24\" width=\"18\" height=\"18\"><path d=\"M12 4v12m0 0l-4.5-4.5m4.5 4.5l4.5-4.5\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg><svg class=\"ptr-spinner\" viewBox=\"0 0 24 24\" width=\"18\" height=\"18\"><circle cx=\"12\" cy=\"12\" r=\"9\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" opacity=\"0.25\"/><path d=\"M12 3 a 9 9 0 0 1 0 18 a 9 9 0 0 1 0 -18\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\"/></svg></div><span class=\"ptr-label\">下拉刷新</span></div>';" +
-                    "    document.body.insertBefore(t,document.body.firstChild);" +
-                    "  }" +
-                    "  return t;" +
-                    "}" +
-                    "function isAtTop(){" +
-                    "  if(window.scrollY>2)return false;" +
-                    "  if(document.documentElement&&document.documentElement.scrollTop>2)return false;" +
-                    "  if(document.body&&document.body.scrollTop>2)return false;" +
-                    "  var m=document.querySelector('main');if(m&&m.scrollTop>2)return false;" +
-                    "  var scs=document.querySelectorAll('.overflow-y-auto,.overflow-auto');" +
-                    "  for(var i=0;i<scs.length;i++){" +
-                    "    if(!scs[i].closest('aside,[data-sidebar]')&&scs[i].scrollTop>2)return false;" +
+                    "if(window.__arena_ptr_hook__)return;" +
+                    "window.__arena_ptr_hook__=true;" +
+                    "function checkCanPull(target){" +
+                    "  if(!target)return true;" +
+                    "  if(target.closest&&target.closest('input,textarea,[contenteditable=\"true\"],aside,[data-sidebar],#amp-lite-dock'))return false;" +
+                    "  if(window.scrollY>2||(document.documentElement&&document.documentElement.scrollTop>2)||(document.body&&document.body.scrollTop>2))return false;" +
+                    "  var el=target;" +
+                    "  while(el&&el!==document.body&&el!==document.documentElement){" +
+                    "    if(el.scrollTop>2)return false;" +
+                    "    el=el.parentElement;" +
                     "  }" +
                     "  return true;" +
                     "}" +
-                    "var startY=0,startX=0,pulling=false,currentPull=0;" +
-                    "var THRESHOLD=58;" +
-                    "var isRefreshing=false;" +
-                    "window.__arena_ptr_reset=function(){" +
-                    "  isRefreshing=false;pulling=false;startY=0;currentPull=0;" +
-                    "  if(document.body){" +
-                    "    document.body.style.transition='transform .25s cubic-bezier(.2,.9,.3,1)';" +
-                    "    document.body.style.transform='translate3d(0,0,0)';" +
-                    "    setTimeout(function(){" +
-                    "      if(!pulling&&!isRefreshing&&document.body){" +
-                    "        document.body.style.transform='';" +
-                    "        document.body.style.transition='';" +
-                    "      }" +
-                    "    },260);" +
-                    "  }" +
-                    "  var tray=document.getElementById('__arena_ptr_tray__');" +
-                    "  if(tray){" +
-                    "    tray.classList.remove('ptr-ready','ptr-refreshing');" +
-                    "    var lbl=tray.querySelector('.ptr-label');" +
-                    "    if(lbl)lbl.textContent='下拉刷新';" +
-                    "    var arrow=tray.querySelector('.ptr-arrow');" +
-                    "    if(arrow)arrow.style.transform='rotate(0deg)';" +
-                    "  }" +
-                    "};" +
                     "document.addEventListener('touchstart',function(e){" +
-                    "  if(isRefreshing)return;" +
-                    "  if(!e.touches||e.touches.length!==1)return;" +
-                    "  var t=e.target;" +
-                    "  if(t&&t.closest&&(t.closest('input,textarea,[contenteditable=\"true\"],aside,[data-sidebar]')))return;" +
-                    "  if(!isAtTop())return;" +
-                    "  startY=e.touches[0].clientY;startX=e.touches[0].clientX;pulling=false;currentPull=0;" +
-                    "  getTray();" +
-                    "},{passive:true});" +
-                    "document.addEventListener('touchmove',function(e){" +
-                    "  if(isRefreshing||startY===0)return;" +
-                    "  if(!e.touches||e.touches.length!==1)return;" +
-                    "  var y=e.touches[0].clientY,x=e.touches[0].clientX,dy=y-startY,dx=x-startX;" +
-                    "  if(!pulling){" +
-                    "    if(dy>8&&dy>Math.abs(dx)*1.2){" +
-                    "      if(isAtTop()){pulling=true;}else{startY=0;return;}" +
-                    "    }else if(Math.abs(dx)>dy||dy<0){" +
-                    "      startY=0;return;" +
+                    "  try{" +
+                    "    var t=(e.touches&&e.touches[0])?document.elementFromPoint(e.touches[0].clientX,e.touches[0].clientY):e.target;" +
+                    "    var ok=checkCanPull(t||e.target);" +
+                    "    if(window.AndroidBridge&&window.AndroidBridge.setCanPullToRefresh){" +
+                    "      window.AndroidBridge.setCanPullToRefresh(ok);" +
                     "    }" +
-                    "  }" +
-                    "  if(pulling){" +
-                    "    if(e.cancelable)e.preventDefault();" +
-                    "    var tray=getTray();" +
-                    "    if(!tray)return;" +
-                    "    if(dy<=0){" +
-                    "      currentPull=0;" +
-                    "      document.body.style.transition='none';" +
-                    "      document.body.style.transform='translate3d(0,0,0)';" +
-                    "      tray.classList.remove('ptr-ready');" +
-                    "      var lbl=tray.querySelector('.ptr-label');" +
-                    "      if(lbl)lbl.textContent='下拉刷新';" +
-                    "      return;" +
-                    "    }" +
-                    "    currentPull=Math.min(130,Math.pow(dy,0.82)*1.5);" +
-                    "    document.body.style.transition='none';" +
-                    "    document.body.style.transform='translate3d(0,'+currentPull+'px,0)';" +
-                    "    var lbl=tray.querySelector('.ptr-label');" +
-                    "    var arrow=tray.querySelector('.ptr-arrow');" +
-                    "    if(currentPull>=THRESHOLD){" +
-                    "      tray.classList.add('ptr-ready');" +
-                    "      if(lbl)lbl.textContent='释放立即刷新';" +
-                    "      if(arrow)arrow.style.transform='rotate(180deg)';" +
-                    "    }else{" +
-                    "      tray.classList.remove('ptr-ready');" +
-                    "      if(lbl)lbl.textContent='下拉刷新';" +
-                    "      var deg=Math.min(180,(currentPull/THRESHOLD)*180);" +
-                    "      if(arrow)arrow.style.transform='rotate('+deg+'deg)';" +
-                    "    }" +
-                    "  }" +
-                    "},{passive:false});" +
-                    "function onRelease(){" +
-                    "  if(isRefreshing||!pulling){startY=0;return;}" +
-                    "  pulling=false;startY=0;" +
-                    "  var tray=getTray();" +
-                    "  if(currentPull>=THRESHOLD){" +
-                    "    isRefreshing=true;" +
-                    "    document.body.style.transition='transform .22s cubic-bezier(.2,.9,.3,1)';" +
-                    "    document.body.style.transform='translate3d(0,52px,0)';" +
-                    "    if(tray){" +
-                    "      tray.classList.remove('ptr-ready');" +
-                    "      tray.classList.add('ptr-refreshing');" +
-                    "      var lbl=tray.querySelector('.ptr-label');" +
-                    "      if(lbl)lbl.textContent='正在刷新...';" +
-                    "    }" +
-                    "    setTimeout(function(){" +
-                    "      if(window.AndroidBridge&&window.AndroidBridge.reloadPage){" +
-                    "        window.AndroidBridge.reloadPage();" +
-                    "      }else{" +
-                    "        location.reload();" +
-                    "      }" +
-                    "    },120);" +
-                    "    setTimeout(function(){" +
-                    "      if(isRefreshing){window.__arena_ptr_reset();}" +
-                    "    },10000);" +
-                    "  }else{" +
-                    "    window.__arena_ptr_reset();" +
-                    "  }" +
-                    "}" +
-                    "document.addEventListener('touchend',onRelease,{passive:true});" +
-                    "document.addEventListener('touchcancel',window.__arena_ptr_reset,{passive:true});" +
+                    "  }catch(err){}" +
+                    "},{passive:true,capture:true});" +
                     "})();";
             view.evaluateJavascript(ptrScript, null);
         }
 
         public static void resetPullToRefresh(WebView view) {
             if (view == null) return;
-            view.evaluateJavascript(
-                "javascript:(function(){" +
-                "if(window.__arena_ptr_reset)window.__arena_ptr_reset();" +
-                "})();", null
-            );
+            Context ctx = view.getContext();
+            if (ctx instanceof MainActivity) {
+                final MainActivity act = (MainActivity) ctx;
+                view.postDelayed(new PtrResetRunnable(act), 280);
+            }
         }
 
         @Override
