@@ -22,6 +22,7 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
+import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
@@ -60,6 +61,15 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // Enable true immersive fullscreen & camera cutout area
+        Window window = getWindow();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            WindowManager.LayoutParams lp = window.getAttributes();
+            lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            window.setAttributes(lp);
+        }
+        applyFullScreen();
 
         // Synchronize launcher icon based on current system Dark/Light theme
         boolean isNight = isSystemNightMode();
@@ -163,16 +173,47 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
 
     @Override
     public WindowInsets onApplyWindowInsets(View v, WindowInsets insets) {
-        android.graphics.Insets navInsets = insets.getInsets(
-            WindowInsets.Type.navigationBars() | WindowInsets.Type.ime() | WindowInsets.Type.displayCutout()
-        );
-        v.setPadding(0, 0, 0, navInsets.bottom);
+        // ONLY lift view for IME (soft keyboard)!
+        // NEVER pad for navigationBars or displayCutout, ensuring true edge-to-edge fullscreen
+        // and avoiding the ugly blank gap / broken layout when the gesture navigation bar is active.
+        int imeBottom = insets.getInsets(WindowInsets.Type.ime()).bottom;
+        v.setPadding(0, 0, 0, imeBottom);
         return insets;
+    }
+
+    public void applyFullScreen() {
+        Window window = getWindow();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.setDecorFitsSystemWindows(false);
+            WindowInsetsController controller = window.getInsetsController();
+            if (controller != null) {
+                controller.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+                controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            }
+        } else {
+            window.getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_FULLSCREEN
+                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            );
+        }
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) {
+            applyFullScreen();
+        }
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        applyFullScreen();
         boolean isNight = isSystemNightMode();
         updateSystemBarsAndTheme(isNight);
         checkAndSyncLauncherIcon(isNight);
@@ -190,8 +231,8 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         int themeColor = isNight ? Color.parseColor("#111113") : Color.parseColor("#FFFFFF");
 
         Window window = getWindow();
-        window.setStatusBarColor(themeColor);
-        window.setNavigationBarColor(themeColor);
+        window.setStatusBarColor(Color.TRANSPARENT);
+        window.setNavigationBarColor(Color.TRANSPARENT);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             WindowInsetsController controller = window.getInsetsController();
@@ -216,6 +257,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
             }
             syncWebPageTheme(isNight);
         }
+        applyFullScreen();
     }
 
     public void syncWebPageTheme(boolean isNight) {
@@ -451,6 +493,8 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                         "main,[role=\"main\"]{padding-bottom:32px !important;}" +
                         "form:has(textarea[name=\"message\"]),form:has(textarea){margin-bottom:16px !important;}" +
                         "p.text-xs,div.text-xs{margin-bottom:12px !important;}" +
+                        "#amp-native-bar{z-index:99999 !important;}" +
+                        "aside,[data-sidebar]{padding-bottom:28px !important;}" +
                         "';" +
                         "(document.head||document.documentElement).appendChild(st);" +
                         "}})();";
@@ -668,6 +712,8 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         // 2. Ensure bottom bar left & right safe padding (padding: 0 20px 0 24px)
         code = code.replaceAll("(\\.bar\\{box-sizing:border-box;height:\\$\\{BAR_H\\}px;display:flex;align-items:center;gap:0;)padding:[^;]+;",
                 "$1padding:0 20px 0 24px;");
+        // 3. Ensure bottom bar stays on top of sidebar drawers
+        code = code.replace("z-index:30;", "z-index:99999;");
         return code;
     }
 
