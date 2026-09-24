@@ -172,8 +172,8 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
             );
         }
 
-        // Load Arena URL
-        webView.loadUrl("https://arena.ai");
+        // Load Arena URL (defaults to /agent)
+        webView.loadUrl("https://arena.ai/agent");
     }
 
     public boolean isSystemNightMode() {
