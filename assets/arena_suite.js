@@ -3507,10 +3507,10 @@ const gacha = (() => {
   ];
   const vendorBy = id => VENDORS.find(v => v.id === id) || null;
   const vendorFromText = t => { t = String(t || '').toLowerCase(); return VENDORS.find(v => v.kw.some(k => t.includes(k)))?.id || ''; };
-  const OLD_PROMPT = '只回答 1，不要多字。', OLD_PROMPTS = [OLD_PROMPT, '回复1', '只回复9，不要任何解释', '只回复9，不要任何解释。', '只回复9不要任何解释', '只回复9'];
+  const OLD_PROMPT = '只回答数字 1，不要补充其他文字。', OLD_PROMPTS = [OLD_PROMPT, '回复1', '直接回复我1+1'];
   const DEFAULTS = {
     vendor: '', archiveKeywords: ['super', 'GLM', 'deepseek', 'qwen', 'doubao', 'gpt-5.5', 'spark', 'grok-4.5'],
-    archiveOn: true, prompt: '直接回复我1+1', maxAttempts: 20, intervalMs: 800, stopOnThinking: true, sortSidebar: true
+    archiveOn: true, prompt: '只回复我9不要调用任何工具', maxAttempts: 20, intervalMs: 800, stopOnThinking: true, sortSidebar: true
   };
   // Base waits for a normal device/network. Every wait is multiplied by pace.scale (1–4), learned from this run.
   // None of these skip a draw: a missing model triggers a resend in the same chat; a broken step pauses with a reason.
