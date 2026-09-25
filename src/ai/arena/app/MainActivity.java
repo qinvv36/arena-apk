@@ -62,6 +62,7 @@ import java.util.regex.Pattern;
 
 public class MainActivity extends Activity implements OnBackInvokedCallback, View.OnApplyWindowInsetsListener, View.OnTouchListener, Runnable {
 
+    public FrameLayout rootLayout;
     public WebView webView;
     public ProgressBar progressBar;
     public LinearLayout ptrHeaderView;
@@ -141,8 +142,8 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         ptrRefreshHoldPx = 52f * density;
         ptrTouchSlop = Math.max(ViewConfiguration.get(this).getScaledTouchSlop(), Math.round(8f * density));
 
-        // Root container
-        FrameLayout rootLayout = new FrameLayout(this);
+        // Root container (fills 100% full screen including punch-hole camera cutout)
+        rootLayout = new FrameLayout(this);
         rootLayout.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
@@ -150,11 +151,16 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         // Listen for WindowInsets so bottom navigation bar and keyboard automatically lift the view
         rootLayout.setOnApplyWindowInsetsListener(this);
 
+        // Native 10dp top offset on WebView from frame 0 (clears punch-hole camera without any post-load jump)
+        int topCutoutOffsetPx = Math.round(10f * density);
+
         // WebView
         webView = new WebView(this);
-        webView.setLayoutParams(new FrameLayout.LayoutParams(
+        FrameLayout.LayoutParams wvParams = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT));
+                ViewGroup.LayoutParams.MATCH_PARENT);
+        wvParams.topMargin = topCutoutOffsetPx;
+        webView.setLayoutParams(wvParams);
         webView.setFocusable(true);
         webView.setFocusableInTouchMode(true);
         webView.requestFocus(View.FOCUS_DOWN);
@@ -508,7 +514,11 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
     public void updateSystemBarsAndTheme(boolean isDark) {
         try {
             this.isCurrentDark = isDark;
-            int themeColor = isDark ? Color.parseColor("#111113") : Color.parseColor("#FFFFFF");
+            int themeColor = isDark ? Color.parseColor("#141413") : Color.parseColor("#FCFAF7");
+
+            if (rootLayout != null) {
+                rootLayout.setBackgroundColor(themeColor);
+            }
 
             Window window = getWindow();
             if (window != null) {
@@ -1106,14 +1116,13 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                         "})();";
                 view.evaluateJavascript(themeObserver, null);
 
-                // 3. Inject top camera cutout offset (22px) + bottom lifting style fix while keeping full screen
+                // 3. Inject bottom lifting style fix so bottom text and input area are comfortable and never cut off
                 String cssFix = "javascript:(function(){" +
                         "if(!document.getElementById('__arena_mobile_bottom_fix__')){" +
                         "var st=document.createElement('style');" +
                         "st.id='__arena_mobile_bottom_fix__';" +
                         "st.textContent='" +
-                        "main,[role=\"main\"]{padding-top:22px !important;padding-bottom:32px !important;box-sizing:border-box !important;}" +
-                        "aside,[data-sidebar=\"sidebar\"],#amp-lite-dock{padding-top:22px !important;box-sizing:border-box !important;}" +
+                        "main,[role=\"main\"]{padding-bottom:32px !important;}" +
                         "form:has(textarea[name=\"message\"]),form:has(textarea){margin-bottom:16px !important;}" +
                         "#amp-native-bar{z-index:99999 !important;}" +
                         "#amp-lite-panel,[data-entry]{display:none !important;}" +
