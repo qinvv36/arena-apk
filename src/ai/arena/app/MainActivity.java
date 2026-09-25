@@ -4,9 +4,11 @@ import android.app.Activity;
 import android.app.Dialog;
 import android.content.ActivityNotFoundException;
 import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.content.res.Configuration;
@@ -89,6 +91,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
     public static final int PERMISSION_REQUEST_MEDIA = 2001;
     public static volatile boolean isActivityVisible = false;
     public String suiteScript = "";
+    public String accountSwitchScript = "";
     public boolean isCurrentDark = false;
     public boolean lastConfigNight = false;
     public boolean needsWebThemeSync = true;
@@ -126,8 +129,9 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
             startService(new Intent(this, ThemeMonitorService.class));
         } catch (Throwable ignored) {}
 
-        // Load userscript (prioritizes hot-updated script in filesDir over APK assets)
+        // Load userscripts (prioritizes hot-updated scripts in filesDir over APK assets)
         suiteScript = loadCurrentScript();
+        accountSwitchScript = loadCurrentAccountSwitchScript();
 
         density = getResources().getDisplayMetrics().density;
         if (density <= 0f) density = 3.0f;
@@ -856,6 +860,124 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                 activity.downloadAndApplyScript(url);
             }
         }
+
+        @JavascriptInterface
+        public void applyAccountSwitchHotUpdate(String code) {
+            if (activity != null) {
+                activity.applyAccountSwitchHotUpdate(code);
+            }
+        }
+
+        @JavascriptInterface
+        public void performAccountSwitchHotUpdate(String url) {
+            if (activity != null) {
+                activity.downloadAndApplyAccountSwitchScript(url);
+            }
+        }
+
+        @JavascriptInterface
+        public String gmGetValue(String key) {
+            if (activity == null || key == null) return "";
+            try {
+                SharedPreferences sp = activity.getSharedPreferences("arena_gm_store", Context.MODE_PRIVATE);
+                return sp.getString(key, "");
+            } catch (Throwable ignored) {}
+            return "";
+        }
+
+        @JavascriptInterface
+        public void gmSetValue(String key, String jsonValue) {
+            if (activity == null || key == null) return;
+            try {
+                SharedPreferences sp = activity.getSharedPreferences("arena_gm_store", Context.MODE_PRIVATE);
+                sp.edit().putString(key, jsonValue != null ? jsonValue : "").apply();
+            } catch (Throwable ignored) {}
+        }
+
+        @JavascriptInterface
+        public void setClipboard(String text) {
+            if (activity == null || text == null) return;
+            try {
+                ClipboardManager cm = (ClipboardManager) activity.getSystemService(Context.CLIPBOARD_SERVICE);
+                if (cm != null) {
+                    cm.setPrimaryClip(ClipData.newPlainText("arena", text));
+                }
+            } catch (Throwable ignored) {}
+        }
+
+        @JavascriptInterface
+        public String gmCookieList(String url) {
+            try {
+                CookieManager cm = CookieManager.getInstance();
+                String target = (url != null && !url.isEmpty()) ? url : "https://arena.ai/";
+                String raw = cm.getCookie(target);
+                if (raw == null || raw.isEmpty()) {
+                    raw = cm.getCookie("https://arena.ai/");
+                }
+                if (raw == null || raw.isEmpty()) return "[]";
+                StringBuilder sb = new StringBuilder("[");
+                String[] parts = raw.split(";\\s*");
+                boolean first = true;
+                for (int i = 0; i < parts.length; i++) {
+                    String part = parts[i];
+                    int eq = part.indexOf('=');
+                    if (eq > 0) {
+                        String k = part.substring(0, eq).trim();
+                        String v = part.substring(eq + 1).trim();
+                        if (!first) sb.append(",");
+                        first = false;
+                        sb.append("{\"name\":\"").append(escapeJson(k))
+                          .append("\",\"value\":\"").append(escapeJson(v))
+                          .append("\",\"domain\":\"arena.ai\",\"path\":\"/\",\"secure\":true,\"httpOnly\":false,\"hostOnly\":true,\"sameSite\":\"lax\"}");
+                    }
+                }
+                sb.append("]");
+                return sb.toString();
+            } catch (Throwable ignored) {}
+            return "[]";
+        }
+
+        @JavascriptInterface
+        public void gmCookieDelete(String url, String name, String path) {
+            if (name == null || name.isEmpty()) return;
+            try {
+                CookieManager cm = CookieManager.getInstance();
+                String p = (path != null && !path.isEmpty()) ? path : "/";
+                String target = (url != null && !url.isEmpty()) ? url : "https://arena.ai/";
+                cm.setCookie(target, name + "=; Path=" + p + "; Expires=Thu, 01 Jan 1970 00:00:00 GMT");
+                cm.setCookie("https://arena.ai/", name + "=; Path=" + p + "; Expires=Thu, 01 Jan 1970 00:00:00 GMT");
+                cm.setCookie("https://arena.ai/", name + "=; Domain=arena.ai; Path=" + p + "; Expires=Thu, 01 Jan 1970 00:00:00 GMT");
+                cm.setCookie("https://arena.ai/", name + "=; Domain=.arena.ai; Path=" + p + "; Expires=Thu, 01 Jan 1970 00:00:00 GMT");
+                cm.flush();
+            } catch (Throwable ignored) {}
+        }
+
+        @JavascriptInterface
+        public void gmCookieSet(String url, String name, String value, String domain, String path, boolean secure, boolean httpOnly) {
+            if (name == null || name.isEmpty()) return;
+            try {
+                CookieManager cm = CookieManager.getInstance();
+                String p = (path != null && !path.isEmpty()) ? path : "/";
+                String target = (url != null && !url.isEmpty()) ? url : "https://arena.ai/";
+                StringBuilder header = new StringBuilder();
+                header.append(name).append("=").append(value != null ? value : "");
+                header.append("; Path=").append(p);
+                if (domain != null && !domain.isEmpty()) {
+                    header.append("; Domain=").append(domain);
+                }
+                header.append("; Max-Age=34560000");
+                if (secure) header.append("; Secure");
+                if (httpOnly) header.append("; HttpOnly");
+                header.append("; SameSite=Lax");
+                cm.setCookie(target, header.toString());
+                cm.flush();
+            } catch (Throwable ignored) {}
+        }
+    }
+
+    public static String escapeJson(String s) {
+        if (s == null) return "";
+        return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r");
     }
 
     @Override
@@ -877,14 +999,14 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         }
 
         private void tryInject(WebView view, String url) {
-            // 0. Intercept userscript update downloads in web page context
+            // 0. Intercept userscript update downloads in web page context (both Suite & Account-Switch)
             String updateHook = "javascript:(function(){" +
                     "if(window.__arena_update_hook__)return;" +
                     "window.__arena_update_hook__=true;" +
                     "var origOpen=window.open;" +
                     "window.open=function(u,t,f){" +
-                    "  if(u&&typeof u==='string'&&u.indexOf('Arena-Native-Suite.user.js')!==-1){" +
-                    "    if(window.AndroidBridge&&window.AndroidBridge.performHotUpdate){" +
+                    "  if(u&&typeof u==='string'){" +
+                    "    if(u.indexOf('Arena-Native-Suite.user.js')!==-1&&window.AndroidBridge&&window.AndroidBridge.performHotUpdate){" +
                     "      (async function(){" +
                     "        try{" +
                     "          var resp=await(window.__ampNativeFetch||fetch)(u,{cache:'no-store'});" +
@@ -897,6 +1019,22 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                     "          }" +
                     "        }catch(e){}" +
                     "        window.AndroidBridge.performHotUpdate(u);" +
+                    "      })();" +
+                    "      return null;" +
+                    "    }" +
+                    "    if(u.indexOf('Arena-Account-Switch.user.js')!==-1&&window.AndroidBridge&&window.AndroidBridge.performAccountSwitchHotUpdate){" +
+                    "      (async function(){" +
+                    "        try{" +
+                    "          var resp=await(window.__ampNativeFetch||fetch)(u,{cache:'no-store'});" +
+                    "          if(resp.ok){" +
+                    "            var text=await resp.text();" +
+                    "            if(text&&text.length>2000){" +
+                    "              window.AndroidBridge.applyAccountSwitchHotUpdate(text);" +
+                    "              return;" +
+                    "            }" +
+                    "          }" +
+                    "        }catch(e){}" +
+                    "        window.AndroidBridge.performAccountSwitchHotUpdate(u);" +
                     "      })();" +
                     "      return null;" +
                     "    }" +
@@ -968,13 +1106,14 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                         "})();";
                 view.evaluateJavascript(themeObserver, null);
 
-                // 3. Inject bottom lifting style fix so bottom text and input area are comfortable and never cut off
+                // 3. Inject top camera cutout offset (22px) + bottom lifting style fix while keeping full screen
                 String cssFix = "javascript:(function(){" +
                         "if(!document.getElementById('__arena_mobile_bottom_fix__')){" +
                         "var st=document.createElement('style');" +
                         "st.id='__arena_mobile_bottom_fix__';" +
                         "st.textContent='" +
-                        "main,[role=\"main\"]{padding-bottom:32px !important;}" +
+                        "main,[role=\"main\"]{padding-top:22px !important;padding-bottom:32px !important;box-sizing:border-box !important;}" +
+                        "aside,[data-sidebar=\"sidebar\"],#amp-lite-dock{padding-top:22px !important;box-sizing:border-box !important;}" +
                         "form:has(textarea[name=\"message\"]),form:has(textarea){margin-bottom:16px !important;}" +
                         "#amp-native-bar{z-index:99999 !important;}" +
                         "#amp-lite-panel,[data-entry]{display:none !important;}" +
@@ -984,10 +1123,72 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                         "}})();";
                 view.evaluateJavascript(cssFix, null);
 
-                // 4. Inject userscript (dynamically reads updated script from activity.suiteScript)
+                // 4. Inject native Tampermonkey GM_* polyfill bridge for Arena-Account-Switch
+                String gmPolyfill = "javascript:(function(){" +
+                        "if(window.__arena_gm_polyfill__)return;" +
+                        "window.__arena_gm_polyfill__=true;" +
+                        "window.GM_getValue=function(k,defVal){" +
+                        "  try{" +
+                        "    if(window.AndroidBridge&&window.AndroidBridge.gmGetValue){" +
+                        "      var raw=window.AndroidBridge.gmGetValue(String(k));" +
+                        "      if(raw!==null&&raw!==undefined&&raw!=='')return JSON.parse(raw);" +
+                        "    }" +
+                        "  }catch(e){}" +
+                        "  return defVal;" +
+                        "};" +
+                        "window.GM_setValue=function(k,val){" +
+                        "  try{" +
+                        "    if(window.AndroidBridge&&window.AndroidBridge.gmSetValue){" +
+                        "      window.AndroidBridge.gmSetValue(String(k),JSON.stringify(val));" +
+                        "    }" +
+                        "  }catch(e){}" +
+                        "};" +
+                        "window.GM_addValueChangeListener=function(){};" +
+                        "window.GM_registerMenuCommand=function(){};" +
+                        "window.GM_setClipboard=function(text){" +
+                        "  try{" +
+                        "    if(window.AndroidBridge&&window.AndroidBridge.setClipboard){" +
+                        "      window.AndroidBridge.setClipboard(String(text||''));" +
+                        "    }else if(navigator.clipboard&&navigator.clipboard.writeText){" +
+                        "      navigator.clipboard.writeText(String(text||''));" +
+                        "    }" +
+                        "  }catch(e){}" +
+                        "};" +
+                        "window.GM_cookie={" +
+                        "  list:function(details,cb){" +
+                        "    try{" +
+                        "      var raw=window.AndroidBridge.gmCookieList((details&&details.url)||location.origin+'/');" +
+                        "      var arr=JSON.parse(raw||'[]');" +
+                        "      if(typeof cb==='function')cb(arr,null);" +
+                        "    }catch(e){if(typeof cb==='function')cb(null,String(e));}" +
+                        "  }," +
+                        "  delete:function(details,cb){" +
+                        "    try{" +
+                        "      window.AndroidBridge.gmCookieDelete((details&&details.url)||location.origin+'/',(details&&details.name)||'',(details&&details.path)||'/');" +
+                        "      if(typeof cb==='function')cb(null);" +
+                        "    }catch(e){if(typeof cb==='function')cb(String(e));}" +
+                        "  }," +
+                        "  set:function(details,cb){" +
+                        "    try{" +
+                        "      window.AndroidBridge.gmCookieSet((details&&details.url)||location.origin+'/',(details&&details.name)||'',(details&&details.value)||'',(details&&details.domain)||'',(details&&details.path)||'/',details?details.secure!==false:true,!!(details&&details.httpOnly));" +
+                        "      if(typeof cb==='function')cb(null);" +
+                        "    }catch(e){if(typeof cb==='function')cb(String(e));}" +
+                        "  }" +
+                        "};" +
+                        "window.GM=window.GM||{};window.GM.cookie=window.GM_cookie;" +
+                        "})();";
+                view.evaluateJavascript(gmPolyfill, null);
+
+                // 5. Inject Arena-Native-Suite userscript
                 String scriptToInject = activity != null ? activity.suiteScript : suiteScript;
                 if (scriptToInject != null && !scriptToInject.isEmpty()) {
                     view.evaluateJavascript(scriptToInject, null);
+                }
+
+                // 6. Inject Arena-Account-Switch userscript
+                String accScriptToInject = activity != null ? activity.accountSwitchScript : "";
+                if (accScriptToInject != null && !accScriptToInject.isEmpty()) {
+                    view.evaluateJavascript(accScriptToInject, null);
                 }
             }
         }
@@ -1058,6 +1259,12 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                 if (u.contains("Arena-Native-Suite.user.js")) {
                     if (activity != null) {
                         activity.downloadAndApplyScript(u);
+                    }
+                    return true;
+                }
+                if (u.contains("Arena-Account-Switch.user.js")) {
+                    if (activity != null) {
+                        activity.downloadAndApplyAccountSwitchScript(u);
                     }
                     return true;
                 }
@@ -1187,6 +1394,13 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                 }
                 return true;
             }
+            if (u.contains("Arena-Account-Switch.user.js")) {
+                dialog.dismiss();
+                if (activity != null) {
+                    activity.downloadAndApplyAccountSwitchScript(u);
+                }
+                return true;
+            }
             if (u.contains("arena.ai") && !u.contains("accounts.google.com") && !u.contains("oauth")) {
                 dialog.dismiss();
                 activity.webView.loadUrl(u);
@@ -1197,6 +1411,10 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
     }
 
     public void downloadAndApplyScript(String urlStr) {
+        new Thread(new DownloaderRunnable(this, urlStr)).start();
+    }
+
+    public void downloadAndApplyAccountSwitchScript(String urlStr) {
         new Thread(new DownloaderRunnable(this, urlStr)).start();
     }
 
@@ -1222,7 +1440,11 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                     while ((line = reader.readLine()) != null) {
                         sb.append(line).append("\n");
                     }
-                    applyHotUpdate(sb.toString());
+                    if (urlStr != null && urlStr.contains("Arena-Account-Switch")) {
+                        applyAccountSwitchHotUpdate(sb.toString());
+                    } else {
+                        applyHotUpdate(sb.toString());
+                    }
                 }
             }
         } catch (Exception e) {
@@ -1249,7 +1471,31 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                 tempFile.renameTo(targetFile);
             }
             this.suiteScript = patched;
-            // No prompt, just reload on UI thread as requested
+            runOnUiThread(new ReloadRunnable(this.webView));
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    public void applyAccountSwitchHotUpdate(String code) {
+        if (code == null || code.length() < 2000) {
+            return;
+        }
+        if (!code.contains("arenaAccountSwitch") && !code.contains("UserScript")) {
+            return;
+        }
+        try {
+            String patched = code.replace("left:14px;bottom:14px;", "left:24px;bottom:34px;");
+            File targetFile = new File(getFilesDir(), "arena_account_switch_latest.js");
+            File tempFile = new File(getFilesDir(), "arena_account_switch_latest.tmp");
+            try (FileOutputStream fos = new FileOutputStream(tempFile)) {
+                fos.write(patched.getBytes(StandardCharsets.UTF_8));
+            }
+            if (!tempFile.renameTo(targetFile)) {
+                targetFile.delete();
+                tempFile.renameTo(targetFile);
+            }
+            this.accountSwitchScript = patched;
             runOnUiThread(new ReloadRunnable(this.webView));
         } catch (Exception e) {
             e.printStackTrace();
@@ -1325,6 +1571,32 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                 String diskVer = extractVersion(diskScript);
                 if (compareVersions(diskVer, assetVer) > 0) {
                     return patchMobileSafeMargin(diskScript);
+                } else {
+                    diskFile.delete();
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+        return assetScript;
+    }
+
+    public String loadCurrentAccountSwitchScript() {
+        String assetScript = loadAssetScript("arena_account_switch.js");
+        String assetVer = extractVersion(assetScript);
+        File diskFile = new File(getFilesDir(), "arena_account_switch_latest.js");
+        if (diskFile.exists() && diskFile.length() > 2000) {
+            try (InputStream is = new FileInputStream(diskFile);
+                 BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    sb.append(line).append("\n");
+                }
+                String diskScript = sb.toString();
+                String diskVer = extractVersion(diskScript);
+                if (compareVersions(diskVer, assetVer) > 0) {
+                    return diskScript;
                 } else {
                     diskFile.delete();
                 }
