@@ -151,8 +151,8 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         // Listen for WindowInsets so bottom navigation bar and keyboard automatically lift the view
         rootLayout.setOnApplyWindowInsetsListener(this);
 
-        // Native 10dp top offset on WebView from frame 0 (clears punch-hole camera without any post-load jump)
-        int topCutoutOffsetPx = Math.round(10f * density);
+        // Native 15.5dp top offset on WebView from frame 0 (clears punch-hole camera above 'opus-5.5' without any post-load jump)
+        int topCutoutOffsetPx = Math.round(15.5f * density);
 
         // WebView
         webView = new WebView(this);
@@ -514,7 +514,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
     public void updateSystemBarsAndTheme(boolean isDark) {
         try {
             this.isCurrentDark = isDark;
-            int themeColor = isDark ? Color.parseColor("#141413") : Color.parseColor("#FCFAF7");
+            int themeColor = isDark ? Color.parseColor("#252523") : Color.parseColor("#FBFAF8");
 
             if (rootLayout != null) {
                 rootLayout.setBackgroundColor(themeColor);
@@ -560,7 +560,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
 
     public void updatePtrHeaderTheme(boolean isDark, boolean isReadyOrRefreshing) {
         if (ptrHeaderView == null) return;
-        int bgColor = isDark ? Color.parseColor("#111113") : Color.parseColor("#FFFFFF");
+        int bgColor = isDark ? Color.parseColor("#252523") : Color.parseColor("#FBFAF8");
         int borderColor = isDark ? Color.parseColor("#1AFFFFFF") : Color.parseColor("#14000000");
         int fgColor;
         if (isDark) {
@@ -822,6 +822,31 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         }
     }
 
+    public static class TopColorRunnable implements Runnable {
+        private final MainActivity activity;
+        private final int color;
+
+        public TopColorRunnable(MainActivity activity, int color) {
+            this.activity = activity;
+            this.color = color;
+        }
+
+        @Override
+        public void run() {
+            if (activity != null) {
+                if (activity.rootLayout != null) {
+                    activity.rootLayout.setBackgroundColor(color);
+                }
+                if (activity.webView != null) {
+                    activity.webView.setBackgroundColor(color);
+                }
+                if (activity.ptrHeaderView != null) {
+                    activity.ptrHeaderView.setBackgroundColor(color);
+                }
+            }
+        }
+    }
+
     public static class AndroidBridge {
         private final MainActivity activity;
 
@@ -840,6 +865,13 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         public void onThemeChanged(boolean isDark) {
             if (activity != null) {
                 activity.runOnUiThread(new ThemeChangeRunnable(activity, isDark));
+            }
+        }
+
+        @JavascriptInterface
+        public void syncTopBarColor(int r, int g, int b) {
+            if (activity != null && r >= 0 && r <= 255 && g >= 0 && g <= 255 && b >= 0 && b <= 255) {
+                activity.runOnUiThread(new TopColorRunnable(activity, Color.rgb(r, g, b)));
             }
         }
 
@@ -1093,7 +1125,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
             view.evaluateJavascript(inputFix, null);
 
             if (url != null && (url.contains("arena.ai") || url.contains("lmsys.org"))) {
-                // 2. Observe web page theme changes (user toggling light/dark inside the app) and sync to native status bar
+                // 2. Observe web page theme changes (user toggling light/dark inside the app) and sync to native status bar + exact RGB top bar
                 String themeObserver = "javascript:(function(){" +
                         "if(window.__arena_theme_observer_installed__)return;" +
                         "window.__arena_theme_observer_installed__=true;" +
@@ -1105,9 +1137,18 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                         "    if(window.AndroidBridge&&window.AndroidBridge.onThemeChanged){" +
                         "      window.AndroidBridge.onThemeChanged(isDark);" +
                         "    }" +
+                        "    var bgEl=document.body||d;" +
+                        "    var cs=bgEl?window.getComputedStyle(bgEl).backgroundColor:'';" +
+                        "    var m=cs&&cs.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);" +
+                        "    if(m&&window.AndroidBridge&&window.AndroidBridge.syncTopBarColor){" +
+                        "      var r=parseInt(m[1],10),g=parseInt(m[2],10),b=parseInt(m[3],10);" +
+                        "      if(r+g+b>0)window.AndroidBridge.syncTopBarColor(r,g,b);" +
+                        "    }" +
                         "  }catch(e){}" +
                         "}" +
                         "reportTheme();" +
+                        "setTimeout(reportTheme,150);" +
+                        "setTimeout(reportTheme,500);" +
                         "try{" +
                         "  var ob=new MutationObserver(reportTheme);" +
                         "  ob.observe(document.documentElement,{attributes:true,attributeFilter:['class','data-theme','style']});" +
