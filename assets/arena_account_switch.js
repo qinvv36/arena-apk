@@ -1458,13 +1458,60 @@
     floater.type = 'button'; floater.onclick = () => void openPanel(null);
   }
 
+  let topAvatarBtn = null;
+  function ensureTopAvatar() {
+    const suiteAvatar = document.getElementById('amp-avatar');
+    if (suiteAvatar && suiteAvatar.isConnected) {
+      if (topAvatarBtn && topAvatarBtn.isConnected) {
+        topAvatarBtn.remove();
+        topAvatarBtn = null;
+      }
+      return;
+    }
+    if (topAvatarBtn && topAvatarBtn.isConnected) return;
+    let anchor = null;
+    const candidates = document.querySelectorAll('main button[aria-label*="workspace" i], main button[aria-label*="工作区"], main button[aria-label="Open sidebar"], header button');
+    for (const b of candidates) {
+      const r = b.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0 && r.top >= 0 && r.top < 80) {
+        anchor = b;
+        if (/workspace|工作区/i.test(b.getAttribute('aria-label') || '')) {
+          break;
+        }
+      }
+    }
+    if (!anchor) return;
+    topAvatarBtn = document.createElement('button');
+    topAvatarBtn.id = 'amp-switch-fallback-avatar';
+    topAvatarBtn.type = 'button';
+    topAvatarBtn.title = '切换 / 登录账号';
+    topAvatarBtn.setAttribute('aria-label', '切换 / 登录账号');
+    topAvatarBtn.style.cssText = 'all:initial;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;cursor:pointer;margin:0 4px;vertical-align:middle;box-shadow:inset 0 0 0 1.5px ' + (dark() ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.15)') + ';background:' + (dark() ? '#2c2b28' : '#fff') + ';color:' + (dark() ? '#ecebe7' : '#262522') + ';-webkit-tap-highlight-color:transparent;z-index:10;';
+    const curAcc = currentId ? find(currentId) : null;
+    if (curAcc?.avatar) {
+      topAvatarBtn.innerHTML = '<img src="' + curAcc.avatar + '" style="width:26px;height:26px;border-radius:50%;object-fit:cover;display:block;" alt="">';
+    } else if (curAcc?.name || curAcc?.email) {
+      const char = (curAcc.name || curAcc.email || '?').trim().charAt(0).toUpperCase();
+      topAvatarBtn.innerHTML = '<span style="font:600 13px/1 system-ui,sans-serif;color:inherit;">' + char + '</span>';
+    } else {
+      topAvatarBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg>';
+    }
+    topAvatarBtn.onclick = e => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (document.querySelector('[data-amp-switcher]')) closeSwitcher();
+      else void openPanel(null);
+    };
+    anchor.after(topAvatarBtn);
+  }
+
   // ---------------- 启动 ----------------
   try { GM_registerMenuCommand('Arena 账号切换', () => void openPanel(null)); GM_registerMenuCommand('账号密码备忘录', () => openMemo()); GM_registerMenuCommand('账号快捷键设置', () => openHotkeys()); GM_registerMenuCommand('导出账号合集（复制到剪贴板）', () => void exportAccounts()); GM_registerMenuCommand('导入账号', () => openImport()); } catch {}
   window.addEventListener('keydown', onHotkey, true);
   // 套件手机顶栏的头像：点一下打开 / 再点关闭账号切换面板（套件 v1.11.68+）
   window.addEventListener('amp:switch-open', () => { if (document.querySelector('[data-amp-switcher]')) closeSwitcher(); else void openPanel(null); });
   let scanQueued = false;
-  const scan = () => { scanQueued = false; const d = profileDialog(); if (d) { injectButton(d); } replaceLogin(); };
+  const scan = () => { scanQueued = false; const d = profileDialog(); if (d) { injectButton(d); } replaceLogin(); ensureTopAvatar(); };
   new MutationObserver(recs => { if (scanQueued) return; if (!recs.some(r => { const e = r.target.nodeType === 1 ? r.target : r.target.parentElement; return e && !e.closest('[role="log"]'); })) return; scanQueued = true; requestAnimationFrame(scan); }).observe(document.documentElement, { childList: true, subtree: true });
   (async () => {
     carryRestoreIfPending();
@@ -1472,6 +1519,7 @@
     await syncCurrent();
     lastSeen = currentId;
     paintFloater();
+    ensureTopAvatar();
     log('v' + VERSION + ' · Cookie 模式 ' + cookieMode + ' · 已保存 ' + accounts.length + ' 个账号' + (currentId ? ' · 当前 ' + currentId : ' · 未登录'));
   })();
   // 令牌会被 Arena 轮换：定期把最新 Cookie 写回当前账号

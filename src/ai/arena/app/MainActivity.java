@@ -70,6 +70,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
     public ProgressBar ptrSpinnerView;
     public TextView ptrLabelView;
     public View ptrBorderView;
+    public View topDividerView;
     public float density = 3.0f;
     public int ptrHeaderHeightPx = 480;
     public float ptrThresholdPx = 168f;
@@ -136,7 +137,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         try {
             SharedPreferences sp = getSharedPreferences("app_meta", MODE_PRIVATE);
             int lastVer = sp.getInt("last_apk_version", 0);
-            if (lastVer < 27) {
+            if (lastVer < 28) {
                 File brokenSuite = new File(getFilesDir(), "arena_suite_latest.js");
                 if (brokenSuite.exists()) brokenSuite.delete();
                 File brokenTmp = new File(getFilesDir(), "arena_suite_latest.tmp");
@@ -145,7 +146,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                 if (brokenSwitch.exists()) brokenSwitch.delete();
                 File brokenSwitchTmp = new File(getFilesDir(), "arena_account_switch_latest.tmp");
                 if (brokenSwitchTmp.exists()) brokenSwitchTmp.delete();
-                sp.edit().putInt("last_apk_version", 27).apply();
+                sp.edit().putInt("last_apk_version", 28).apply();
             }
         } catch (Throwable ignored) {}
 
@@ -186,6 +187,20 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         webView.addJavascriptInterface(new AndroidBridge(this), "AndroidBridge");
         webView.setOnTouchListener(this);
         rootLayout.addView(webView);
+
+        // Top divider hairline: subtle 1px border separating top cutout bar from web content
+        topDividerView = new View(this);
+        int dividerHeightPx = Math.max(1, Math.round(0.8f * density));
+        FrameLayout.LayoutParams dividerParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dividerHeightPx);
+        dividerParams.gravity = Gravity.TOP;
+        dividerParams.topMargin = topCutoutOffsetPx - dividerHeightPx;
+        topDividerView.setLayoutParams(dividerParams);
+        topDividerView.setFocusable(false);
+        topDividerView.setClickable(false);
+        int initialDividerColor = isNight ? Color.parseColor("#1AFFFFFF") : Color.parseColor("#14000000");
+        topDividerView.setBackgroundColor(initialDividerColor);
+        rootLayout.addView(topDividerView);
 
         // Native Pull-To-Refresh Header (sinks together with WebView from top edge)
         ptrHeaderView = new LinearLayout(this);
@@ -542,6 +557,9 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                 }
             }
         }
+        if (topDividerView != null) {
+            topDividerView.setVisibility(isModalOpen ? View.GONE : View.VISIBLE);
+        }
         if (rootLayout != null) {
             if (isModalOpen) {
                 rootLayout.setBackgroundColor(Color.parseColor("#161513"));
@@ -594,6 +612,10 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
             if (webView != null) {
                 webView.setBackgroundColor(themeColor);
             }
+            if (topDividerView != null) {
+                int dividerColor = isDark ? Color.parseColor("#1AFFFFFF") : Color.parseColor("#14000000");
+                topDividerView.setBackgroundColor(dividerColor);
+            }
             updatePtrHeaderTheme(isDark, ptrIsRefreshing || ptrCurrentPullPx >= ptrThresholdPx);
             applyFullScreen();
         } catch (Throwable t) {
@@ -632,6 +654,9 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         ptrCurrentPullPx = 0f;
         if (webView != null) {
             webView.animate().translationY(0f).setDuration(240).start();
+        }
+        if (topDividerView != null) {
+            topDividerView.animate().translationY(0f).setDuration(240).start();
         }
         if (ptrHeaderView != null) {
             ptrHeaderView.animate().translationY(-ptrHeaderHeightPx).setDuration(240).start();
@@ -697,6 +722,9 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                         ptrIsPulling = true;
                         ptrPullStartY = ev.getRawY();
                         webView.animate().cancel();
+                        if (topDividerView != null) {
+                            topDividerView.animate().cancel();
+                        }
                         ptrHeaderView.animate().cancel();
                         MotionEvent cancelEv = MotionEvent.obtain(ev);
                         cancelEv.setAction(MotionEvent.ACTION_CANCEL);
@@ -714,6 +742,9 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                 float dampedDp = (float) (Math.pow(rawPull / density, 0.84) * 1.65);
                 ptrCurrentPullPx = Math.min(ptrMaxPullPx, dampedDp * density);
                 webView.setTranslationY(ptrCurrentPullPx);
+                if (topDividerView != null) {
+                    topDividerView.setTranslationY(ptrCurrentPullPx);
+                }
                 ptrHeaderView.setTranslationY(ptrCurrentPullPx - ptrHeaderHeightPx);
 
                 boolean ready = ptrCurrentPullPx >= ptrThresholdPx;
@@ -739,6 +770,9 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                     if (ptrLabelView != null) ptrLabelView.setText("正在刷新...");
                     updatePtrHeaderTheme(isCurrentDark, true);
                     webView.animate().translationY(ptrRefreshHoldPx).setDuration(200).start();
+                    if (topDividerView != null) {
+                        topDividerView.animate().translationY(ptrRefreshHoldPx).setDuration(200).start();
+                    }
                     ptrHeaderView.animate().translationY(ptrRefreshHoldPx - ptrHeaderHeightPx).setDuration(200).start();
                     if (progressBar != null) {
                         progressBar.setVisibility(View.VISIBLE);
@@ -902,6 +936,15 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                 }
                 if (activity.ptrHeaderView != null) {
                     activity.ptrHeaderView.setBackgroundColor(color);
+                }
+                if (activity.topDividerView != null) {
+                    int r = Color.red(color);
+                    int g = Color.green(color);
+                    int b = Color.blue(color);
+                    double lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0;
+                    boolean isDark = lum < 0.5;
+                    int divColor = isDark ? Color.parseColor("#1AFFFFFF") : Color.parseColor("#14000000");
+                    activity.topDividerView.setBackgroundColor(divColor);
                 }
             }
         }
