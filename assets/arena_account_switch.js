@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arena 账号切换（Arena Native Suite 配套）
 // @namespace    local.amp.native.accounts
-// @version      1.0.28
+// @version      1.0.30
 // @description  【测试版】在 Arena 个人卡片里一键切换已保存的账号；显示各账号最近记录的额度；一键导出/导入账号合集
 // @match        https://arena.ai/*
 // @include      https://arena.ai/*
@@ -22,7 +22,7 @@
   'use strict';
   if (window.__arena_account_switch_installed__) return;
   window.__arena_account_switch_installed__ = true;
-  const VERSION = '1.0.29';
+  const VERSION = '1.0.30';
   try { document.documentElement.dataset.ampSwitchVer = VERSION; } catch {}
   let closeSwitcher = () => {};
   const notifyModalState = (open) => {
@@ -1154,7 +1154,7 @@
   // ---------------- 切换器：全屏轮播 ----------------
   const SW_CSS = `
 [data-amp-switcher]{position:fixed;inset:0;z-index:2147483646;pointer-events:auto;font:13px/1.4 system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;color:#f3f1ec;
-  background:rgba(22,21,19,.75);-webkit-backdrop-filter:blur(10px) saturate(1.1);backdrop-filter:blur(10px) saturate(1.1);opacity:0;transition:opacity .28s ease;user-select:none;outline:none}
+  background:rgba(18,17,16,.97);-webkit-backdrop-filter:blur(20px) saturate(1.1);backdrop-filter:blur(20px) saturate(1.1);opacity:0;transition:opacity .28s ease;user-select:none;outline:none}
 [data-amp-switcher].on{opacity:1}
 [data-amp-switcher] .sw-top{position:absolute;left:0;right:0;top:max(88px, calc(env(safe-area-inset-top, 0px) + 74px));text-align:center;transform:translateY(-8px);opacity:0;transition:all .45s cubic-bezier(.22,1,.36,1) .05s}
 [data-amp-switcher].on .sw-top{transform:none;opacity:1}
@@ -1231,10 +1231,10 @@
 [data-amp-switcher] .sw-addb.solo{top:47%;margin-top:-44px}[data-amp-switcher] .sw-addb.solo .sw-addc{width:112px;height:112px}
 [data-amp-switcher] .sw-hint{left:auto!important;right:22px;bottom:18px!important;text-align:right}
 [data-amp-switcher] .sw-warn{bottom:auto;top:138px}
-[data-amp-switcher].vert .sw-top{top:max(96px, calc(env(safe-area-inset-top, 0px) + 86px));left:0;right:0;text-align:center;pointer-events:none;z-index:2}
+[data-amp-switcher].vert .sw-top{top:max(64px, calc(env(safe-area-inset-top, 0px) + 50px));left:0;right:0;text-align:center;pointer-events:none;z-index:2}
 [data-amp-switcher].vert .sw-title{font-size:17px;font-weight:600;letter-spacing:.3px}
-[data-amp-switcher].vert .sw-sub{display:block !important;font-size:11.5px;color:rgba(243,241,236,.55);margin-top:2px}
-[data-amp-switcher].vert .sw-stage{top:43%}
+[data-amp-switcher].vert .sw-sub{display:none !important}
+[data-amp-switcher].vert .sw-stage{top:48%}
 [data-amp-switcher].vert .sw-it .sw-det{display:none}
 [data-amp-switcher].vert .sw-av{width:112px;height:112px;font-size:40px}
 [data-amp-switcher].vert .sw-it{margin-top:-72px}
@@ -1246,16 +1246,16 @@
 [data-amp-switcher].vert .sw-mcard .sw-mb{padding:3px 8px;border-radius:7px;font-size:11.5px}
 [data-amp-switcher].vert .sw-mcard .sw-rm{margin:0;padding:3px 8px;border-radius:7px;font-size:11.5px;background:rgba(255,255,255,.06)}
 [data-amp-switcher].vert .sw-mcard .sw-bad{font-size:11px;margin-top:3px}
-[data-amp-switcher].vert .sw-mside{display:flex;flex-direction:column;align-items:flex-end;justify-content:center;gap:2px;position:absolute;top:43%;right:calc(50% + 72px);transform:translateY(-50%);width:calc(50% - 84px);max-width:140px;text-align:right;pointer-events:none;transition:opacity .25s ease}
+[data-amp-switcher].vert .sw-mside{display:flex;flex-direction:column;align-items:flex-end;justify-content:center;gap:2px;position:absolute;top:48%;right:calc(50% + 72px);transform:translateY(-50%);width:calc(50% - 84px);max-width:140px;text-align:right;pointer-events:none;transition:opacity .25s ease}
 [data-amp-switcher].vert .sw-mside[hidden]{display:none}
 [data-amp-switcher].vert .sw-mside .sw-q0{margin:0;font-size:11.5px;font-weight:600}
 [data-amp-switcher].vert .sw-mside .sw-q1{margin:2px 0 0;font-size:17px;line-height:1.15;font-weight:700;white-space:nowrap}[data-amp-switcher].vert .sw-mside .sw-q1 small{display:block;font-size:10.5px;font-weight:500;opacity:.6}
 [data-amp-switcher].vert .sw-mside .sw-q2{font-size:11px}
 [data-amp-switcher].vert .sw-mside .sw-q3{font-size:10px;margin-top:2px}
 [data-amp-switcher].vert .sw-arrow{display:none!important}
-[data-amp-switcher].vert .sw-close{right:12px;top:max(48px, calc(env(safe-area-inset-top, 0px) + 38px));width:34px;height:34px;line-height:34px;font-size:18px;z-index:5}
+[data-amp-switcher].vert .sw-close{right:12px;top:max(26px, calc(env(safe-area-inset-top, 0px) + 12px));width:34px;height:34px;line-height:34px;font-size:18px;z-index:5}
 [data-amp-switcher].vert .sw-hint{left:0 !important;right:0 !important;bottom:max(12px, env(safe-area-inset-bottom, 12px)) !important;text-align:center;font-size:11.5px;color:rgba(243,241,236,.45)}
-[data-amp-switcher].vert .sw-addb{left:auto;right:12px;top:43%;transform:translateY(-50%);font-size:10.5px;gap:4px;margin:0}
+[data-amp-switcher].vert .sw-addb{left:auto;right:12px;top:48%;transform:translateY(-50%);font-size:10.5px;gap:4px;margin:0}
 [data-amp-switcher].vert .sw-addc{width:46px;height:46px}[data-amp-switcher].vert .sw-addc svg{width:22px;height:22px}
 [data-amp-switcher].vert .sw-addb:hover{transform:translateY(-50%) scale(1.06)}[data-amp-switcher].vert .sw-addb:active{transform:translateY(-50%) scale(.94)}
 [data-amp-switcher].vert .sw-addb.solo{right:auto;left:50%;transform:translate(-50%,-50%);font-size:13px}[data-amp-switcher].vert .sw-addb.solo .sw-addc{width:112px;height:112px}
@@ -1264,7 +1264,7 @@
 [data-amp-switcher].leaving{opacity:0}
 [data-amp-switcher] .sw-tl{position:absolute;left:18px;top:18px;display:flex;flex-wrap:wrap;gap:8px;max-width:calc(100vw - 90px);z-index:3}
 [data-amp-switcher] .sw-tl .sw-memob{position:static}
-[data-amp-switcher].vert .sw-tl{left:12px;top:max(48px, calc(env(safe-area-inset-top, 0px) + 38px));display:flex;flex-wrap:nowrap;gap:6px;max-width:calc(100vw - 64px);z-index:5}
+[data-amp-switcher].vert .sw-tl{left:12px;top:max(26px, calc(env(safe-area-inset-top, 0px) + 12px));display:flex;flex-wrap:nowrap;gap:6px;max-width:calc(100vw - 64px);z-index:5}
 [data-amp-switcher].vert .sw-tl .sw-hkb{display:none !important}
 [data-amp-switcher].vert .sw-tl .sw-memob{padding:6px 11px;font-size:12px;border-radius:999px;background:rgba(255,255,255,.12);backdrop-filter:blur(4px);white-space:nowrap}
 [data-amp-switcher] .sw-hk{margin-top:4px;padding:1px 7px;border-radius:6px;font:11px/16px ui-monospace,Consolas,monospace;color:rgba(243,241,236,.8);background:rgba(255,255,255,.1);white-space:nowrap}
@@ -1376,7 +1376,7 @@
     const cur0 = items.findIndex(it => it.a && keyOf(it.a) === currentId);
     sel = cur0 >= 0 ? cur0 : 0;
     const X = [0, 175, 300, 400, 480], S = [1, .68, .5, .4, .34], O = [1, .88, .62, .38, 0];
-    const Y = [0, 150, 250, 330, 400], OV = [1, .78, 0, 0, 0];
+    const Y = [0, 140, 240, 320, 390], OV = [1, .78, 0, 0, 0];
     const mcard = el('div', null, null, root); mcard.className = 'sw-mcard';
     // 竖屏：额度信息放在中间头像左侧，底部卡片只留邮箱和操作按钮
     const mside = el('div', null, null, root); mside.className = 'sw-mside';

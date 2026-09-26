@@ -139,7 +139,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         try {
             SharedPreferences sp = getSharedPreferences("app_meta", MODE_PRIVATE);
             int lastVer = sp.getInt("last_apk_version", 0);
-            if (lastVer < 32) {
+            if (lastVer < 33) {
                 File brokenSuite = new File(getFilesDir(), "arena_suite_latest.js");
                 if (brokenSuite.exists()) brokenSuite.delete();
                 File brokenTmp = new File(getFilesDir(), "arena_suite_latest.tmp");
@@ -148,7 +148,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                 if (brokenSwitch.exists()) brokenSwitch.delete();
                 File brokenSwitchTmp = new File(getFilesDir(), "arena_account_switch_latest.tmp");
                 if (brokenSwitchTmp.exists()) brokenSwitchTmp.delete();
-                sp.edit().putInt("last_apk_version", 32).apply();
+                sp.edit().putInt("last_apk_version", 33).apply();
             }
         } catch (Throwable ignored) {}
 
@@ -173,15 +173,15 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         // Listen for WindowInsets so bottom navigation bar and keyboard automatically lift the view
         rootLayout.setOnApplyWindowInsetsListener(this);
 
-        // Native 15.5dp top offset on WebView from frame 0 (clears punch-hole camera without any post-load jump or layout shift)
-        topCutoutOffsetPx = Math.round(15.5f * density);
+        // Native edge-to-edge layout without top gap: WebView fills 100% of physical screen
+        topCutoutOffsetPx = 0;
 
         // WebView
         webView = new WebView(this);
         FrameLayout.LayoutParams wvParams = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT);
-        wvParams.topMargin = topCutoutOffsetPx;
+        wvParams.topMargin = 0;
         webView.setLayoutParams(wvParams);
         webView.setFocusable(true);
         webView.setFocusableInTouchMode(true);
@@ -545,7 +545,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         if (webView != null) {
             FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) webView.getLayoutParams();
             if (lp != null) {
-                int targetMargin = isModalOpen ? 0 : topCutoutOffsetPx;
+                int targetMargin = 0;
                 if (lp.topMargin != targetMargin) {
                     lp.topMargin = targetMargin;
                     webView.setLayoutParams(lp);
@@ -1316,21 +1316,23 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                         "var st=document.createElement('style');" +
                         "st.id='__arena_switcher_mobile_fix__';" +
                         "st.textContent='" +
+                        "[data-amp-switcher]{background:rgba(18,17,16,.97) !important;-webkit-backdrop-filter:blur(20px) !important;backdrop-filter:blur(20px) !important;}" +
                         "[data-amp-switcher] .sw-warn{display:none !important;}" +
-                        "[data-amp-switcher].vert .sw-tl{left:12px !important;top:max(48px, calc(env(safe-area-inset-top, 0px) + 38px)) !important;display:flex !important;flex-wrap:nowrap !important;gap:6px !important;max-width:calc(100vw - 64px) !important;z-index:5 !important;}" +
+                        "[data-amp-switcher].vert .sw-tl{left:12px !important;top:max(26px, calc(env(safe-area-inset-top, 0px) + 12px)) !important;display:flex !important;flex-wrap:nowrap !important;gap:6px !important;max-width:calc(100vw - 64px) !important;z-index:5 !important;}" +
                         "[data-amp-switcher].vert .sw-tl .sw-hkb{display:none !important;}" +
                         "[data-amp-switcher].vert .sw-tl .sw-memob{padding:6px 11px !important;font-size:12px !important;border-radius:999px !important;background:rgba(255,255,255,.12) !important;backdrop-filter:blur(4px) !important;white-space:nowrap !important;}" +
-                        "[data-amp-switcher].vert .sw-close{right:12px !important;top:max(48px, calc(env(safe-area-inset-top, 0px) + 38px)) !important;width:34px !important;height:34px !important;line-height:34px !important;font-size:18px !important;z-index:5 !important;}" +
-                        "[data-amp-switcher].vert .sw-top{top:max(96px, calc(env(safe-area-inset-top, 0px) + 86px)) !important;left:0 !important;right:0 !important;text-align:center !important;pointer-events:none !important;z-index:2 !important;}" +
+                        "[data-amp-switcher].vert .sw-close{right:12px !important;top:max(26px, calc(env(safe-area-inset-top, 0px) + 12px)) !important;width:34px !important;height:34px !important;line-height:34px !important;font-size:18px !important;z-index:5 !important;}" +
+                        "[data-amp-switcher].vert .sw-top{top:max(64px, calc(env(safe-area-inset-top, 0px) + 50px)) !important;left:0 !important;right:0 !important;text-align:center !important;pointer-events:none !important;z-index:2 !important;}" +
                         "[data-amp-switcher].vert .sw-title{font-size:17px !important;font-weight:600 !important;letter-spacing:.3px !important;}" +
-                        "[data-amp-switcher].vert .sw-sub{display:block !important;font-size:11.5px !important;color:rgba(243,241,236,.55) !important;margin-top:2px !important;}" +
-                        "[data-amp-switcher].vert .sw-stage{top:43% !important;}" +
-                        "[data-amp-switcher].vert .sw-mside{top:43% !important;right:calc(50% + 72px) !important;width:calc(50% - 84px) !important;max-width:140px !important;text-align:right !important;}" +
+                        "[data-amp-switcher].vert .sw-sub{display:none !important;}" +
+                        "[data-amp-switcher].vert .sw-stage{top:48% !important;}" +
+                        "[data-amp-switcher].vert .sw-mside{top:48% !important;right:calc(50% + 72px) !important;width:calc(50% - 84px) !important;max-width:140px !important;text-align:right !important;}" +
                         "[data-amp-switcher].vert .sw-mside .sw-q0{font-size:11.5px !important;font-weight:600 !important;}" +
                         "[data-amp-switcher].vert .sw-mside .sw-q1{font-size:17px !important;font-weight:700 !important;line-height:1.15 !important;white-space:nowrap !important;}" +
-                        "[data-amp-switcher].vert .sw-addb{right:12px !important;top:43% !important;font-size:10.5px !important;}" +
+                        "[data-amp-switcher].vert .sw-addb{right:12px !important;top:48% !important;font-size:10.5px !important;}" +
                         "[data-amp-switcher].vert .sw-mcard{bottom:calc(max(14px, env(safe-area-inset-bottom, 14px)) + 36px) !important;width:min(320px, calc(100vw - 32px)) !important;padding:10px 14px !important;border-radius:14px !important;}" +
                         "[data-amp-switcher].vert .sw-hint{left:0 !important;right:0 !important;bottom:max(12px, env(safe-area-inset-bottom, 12px)) !important;text-align:center !important;font-size:11.5px !important;color:rgba(243,241,236,.45) !important;}" +
+                        "html:has([data-amp-switcher].on) #amp-avatar,html:has([data-sidebar=\"sidebar\"][data-mobile=\"true\"]) #amp-avatar,html:has([role=\"dialog\"][data-mobile=\"true\"][data-state=\"open\"]) #amp-avatar{opacity:0 !important;pointer-events:none !important;}" +
                         "[data-amp-login-form] .lf-card{max-width:min(380px, calc(100vw - 32px)) !important;box-sizing:border-box !important;}" +
                         "';" +
                         "(document.head||document.documentElement).appendChild(st);" +
