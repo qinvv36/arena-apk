@@ -139,7 +139,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         try {
             SharedPreferences sp = getSharedPreferences("app_meta", MODE_PRIVATE);
             int lastVer = sp.getInt("last_apk_version", 0);
-            if (lastVer < 31) {
+            if (lastVer < 32) {
                 File brokenSuite = new File(getFilesDir(), "arena_suite_latest.js");
                 if (brokenSuite.exists()) brokenSuite.delete();
                 File brokenTmp = new File(getFilesDir(), "arena_suite_latest.tmp");
@@ -148,7 +148,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                 if (brokenSwitch.exists()) brokenSwitch.delete();
                 File brokenSwitchTmp = new File(getFilesDir(), "arena_account_switch_latest.tmp");
                 if (brokenSwitchTmp.exists()) brokenSwitchTmp.delete();
-                sp.edit().putInt("last_apk_version", 31).apply();
+                sp.edit().putInt("last_apk_version", 32).apply();
             }
         } catch (Throwable ignored) {}
 
@@ -173,15 +173,15 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         // Listen for WindowInsets so bottom navigation bar and keyboard automatically lift the view
         rootLayout.setOnApplyWindowInsetsListener(this);
 
-        // True edge-to-edge layout: WebView spans from y=0 to physical top edge, web UI handles safe padding
-        topCutoutOffsetPx = 0;
+        // Native 15.5dp top offset on WebView from frame 0 (clears punch-hole camera without any post-load jump or layout shift)
+        topCutoutOffsetPx = Math.round(15.5f * density);
 
         // WebView
         webView = new WebView(this);
         FrameLayout.LayoutParams wvParams = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT);
-        wvParams.topMargin = 0;
+        wvParams.topMargin = topCutoutOffsetPx;
         webView.setLayoutParams(wvParams);
         webView.setFocusable(true);
         webView.setFocusableInTouchMode(true);
@@ -544,9 +544,12 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         this.isModalActive = isModalOpen;
         if (webView != null) {
             FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) webView.getLayoutParams();
-            if (lp != null && lp.topMargin != 0) {
-                lp.topMargin = 0;
-                webView.setLayoutParams(lp);
+            if (lp != null) {
+                int targetMargin = isModalOpen ? 0 : topCutoutOffsetPx;
+                if (lp.topMargin != targetMargin) {
+                    lp.topMargin = targetMargin;
+                    webView.setLayoutParams(lp);
+                }
             }
         }
         if (topDividerView != null) {
@@ -556,7 +559,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
             if (isModalOpen) {
                 rootLayout.setBackgroundColor(Color.parseColor("#161513"));
             } else {
-                int themeColor = isCurrentDark ? Color.parseColor("#252523") : Color.parseColor("#FBFAF8");
+                int themeColor = isCurrentDark ? Color.parseColor("#161513") : Color.parseColor("#FAF9F5");
                 rootLayout.setBackgroundColor(themeColor);
             }
         }
@@ -565,7 +568,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
     public void updateSystemBarsAndTheme(boolean isDark) {
         try {
             this.isCurrentDark = isDark;
-            int themeColor = isDark ? Color.parseColor("#252523") : Color.parseColor("#FBFAF8");
+            int themeColor = isDark ? Color.parseColor("#161513") : Color.parseColor("#FAF9F5");
 
             if (rootLayout != null) {
                 if (!isModalActive) {
@@ -1314,11 +1317,11 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                         "st.id='__arena_switcher_mobile_fix__';" +
                         "st.textContent='" +
                         "[data-amp-switcher] .sw-warn{display:none !important;}" +
-                        "[data-amp-switcher].vert .sw-tl{left:12px !important;top:14px !important;display:flex !important;flex-wrap:nowrap !important;gap:6px !important;max-width:calc(100vw - 64px) !important;z-index:5 !important;}" +
+                        "[data-amp-switcher].vert .sw-tl{left:12px !important;top:max(48px, calc(env(safe-area-inset-top, 0px) + 38px)) !important;display:flex !important;flex-wrap:nowrap !important;gap:6px !important;max-width:calc(100vw - 64px) !important;z-index:5 !important;}" +
                         "[data-amp-switcher].vert .sw-tl .sw-hkb{display:none !important;}" +
                         "[data-amp-switcher].vert .sw-tl .sw-memob{padding:6px 11px !important;font-size:12px !important;border-radius:999px !important;background:rgba(255,255,255,.12) !important;backdrop-filter:blur(4px) !important;white-space:nowrap !important;}" +
-                        "[data-amp-switcher].vert .sw-close{right:12px !important;top:14px !important;width:34px !important;height:34px !important;line-height:34px !important;font-size:18px !important;z-index:5 !important;}" +
-                        "[data-amp-switcher].vert .sw-top{top:58px !important;left:0 !important;right:0 !important;text-align:center !important;pointer-events:none !important;z-index:2 !important;}" +
+                        "[data-amp-switcher].vert .sw-close{right:12px !important;top:max(48px, calc(env(safe-area-inset-top, 0px) + 38px)) !important;width:34px !important;height:34px !important;line-height:34px !important;font-size:18px !important;z-index:5 !important;}" +
+                        "[data-amp-switcher].vert .sw-top{top:max(96px, calc(env(safe-area-inset-top, 0px) + 86px)) !important;left:0 !important;right:0 !important;text-align:center !important;pointer-events:none !important;z-index:2 !important;}" +
                         "[data-amp-switcher].vert .sw-title{font-size:17px !important;font-weight:600 !important;letter-spacing:.3px !important;}" +
                         "[data-amp-switcher].vert .sw-sub{display:block !important;font-size:11.5px !important;color:rgba(243,241,236,.55) !important;margin-top:2px !important;}" +
                         "[data-amp-switcher].vert .sw-stage{top:43% !important;}" +

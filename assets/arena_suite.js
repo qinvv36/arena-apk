@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         油猴脚本-额度大的用额度小的没必要用-Arena Native Suite
 // @namespace    local.amp.native
-// @version      1.11.86
+// @version      1.11.87
 // @description  【测试版】Arena 原生
 // @match        https://arena.ai/*
 // @run-at       document-start
@@ -15,7 +15,7 @@
 'use strict';
 // Only one copy may run; installing this next to the original Lite script would double-hook fetch.
 if (window.__AMP_NATIVE_SUITE__) return;
-try { Object.defineProperty(window, '__AMP_NATIVE_SUITE__', { value: '1.11.86' }); } catch {}
+try { Object.defineProperty(window, '__AMP_NATIVE_SUITE__', { value: '1.11.87' }); } catch {}
 // Claude 内部型号几乎都带 -vertex（渠道标记），默认不写进对话名/显示名
 // v1.11.78 “-public”也是部署标记（grok-4.7-xhigh-public）：和 -vertex 一样不显示，档位才能识别出来（xhigh）
 const noVertex = n => typeof n === 'string' ? n.replace(/-vertex(?=$|[-_\s·])/ig, '').replace(/-public(?=$|[\s·])/ig, '') : n;
@@ -8217,9 +8217,7 @@ details.mc-card .section.credits{margin-top:12px}
     const WSR=':is(html[data-amp-wsr] [role=dialog]:is([title="Workspace"],[title="工作区"]),[data-vaul-drawer][data-amp-wsright],[role=dialog][data-amp-wsright])';
     const gemOn=()=>!!prefs.gemLayout&&innerWidth<768&&/^\/agent(?:\/|$)/.test(location.pathname);
     const gemStyle=el('style','','@media (max-width:767px){'
-      +'html[data-amp-gem] main div.grid:has(> div > button[aria-label="Open sidebar"]){display:flex!important;align-items:center;gap:4px;padding-top:max(30px,calc(env(safe-area-inset-top,0px) + 22px))!important;box-sizing:border-box!important}html[data-amp-gem] main div.grid:has(> div > button[aria-label="Open sidebar"]) > div:first-child{flex:none}html[data-amp-gem] main div.grid:has(> div > button[aria-label="Open sidebar"]) > div:nth-child(2){flex:1 1 auto;min-width:0;justify-content:flex-start!important}html[data-amp-gem] main div.grid:has(> div > button[aria-label="Open sidebar"]) > div:last-child{flex:none;gap:6px}html[data-amp-gem] main div.grid:has(> div > button[aria-label="Open sidebar"]) > div:last-child > *{order:1}'
-      +'main header,header:has(button[aria-label="Open sidebar"]){padding-top:max(30px,calc(env(safe-area-inset-top,0px) + 22px))!important;box-sizing:border-box!important}'
-      +'[data-sidebar="header"],aside header,nav header,[data-sidebar="sidebar"] > div:first-child{padding-top:max(26px,calc(env(safe-area-inset-top,0px) + 18px))!important;box-sizing:border-box!important}'
+      +'html[data-amp-gem] main div.grid:has(> div > button[aria-label="Open sidebar"]){display:flex!important;align-items:center;gap:4px}html[data-amp-gem] main div.grid:has(> div > button[aria-label="Open sidebar"]) > div:first-child{flex:none}html[data-amp-gem] main div.grid:has(> div > button[aria-label="Open sidebar"]) > div:nth-child(2){flex:1 1 auto;min-width:0;justify-content:flex-start!important}html[data-amp-gem] main div.grid:has(> div > button[aria-label="Open sidebar"]) > div:last-child{flex:none;gap:6px}html[data-amp-gem] main div.grid:has(> div > button[aria-label="Open sidebar"]) > div:last-child > *{order:1}'
       +'[data-radix-popper-content-wrapper]{max-width:calc(100vw - 20px)!important;box-sizing:border-box!important}'
       +'[data-radix-popper-content-wrapper] > [role="menu"]{min-width:130px;max-width:calc(100vw - 24px)!important;box-sizing:border-box!important}'
       +'html[data-amp-gem] #amp-lite-panel[data-entry]{order:2!important}html[data-amp-gem] #amp-avatar{order:3!important}'
