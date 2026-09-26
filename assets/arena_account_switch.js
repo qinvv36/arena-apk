@@ -20,8 +20,22 @@
 
 (function arenaAccountSwitch() {
   'use strict';
-  const VERSION = '1.0.25';
+  if (window.__arena_account_switch_installed__) return;
+  window.__arena_account_switch_installed__ = true;
+  const VERSION = '1.0.26';
   try { document.documentElement.dataset.ampSwitchVer = VERSION; } catch {}
+  let closeSwitcher = () => {};
+  const notifyModalState = (open) => {
+    try {
+      if (typeof AndroidBridge !== 'undefined' && AndroidBridge.setFullscreenModal) {
+        AndroidBridge.setFullscreenModal(!!open);
+      }
+    } catch {}
+  };
+  window.__ampOpenSwitch = () => {
+    if (document.querySelector('[data-amp-switcher]')) closeSwitcher();
+    else void openPanel(null);
+  };
   const ORIGIN = 'https://' + location.host;
   const AUTH_RE = /^arena-auth-prod-v1(\.\d+)?$/;
   const STORE = 'accounts.v2', OLD_STORE = 'accounts.v1'; // v2：按邮箱去重；旧版本标签页只会写 v1，不再污染
@@ -315,6 +329,15 @@
     const now = authOf(await listCookies());
     for (const c of now) await delCookie(c);
     for (const c of target.cookies) { const err = await setCookie(c); if (err) { toast('写入 Cookie 失败：' + err); return; } }
+    if (typeof AndroidBridge !== 'undefined') {
+      await new Promise(r => setTimeout(r, 120));
+      mirrorIn(target); markDirty();
+      window.addEventListener('pagehide', () => mirrorIn(target), { once: true }); carryArm(carried);
+      try { sessionStorage.setItem(PENDING, JSON.stringify({ key: keyOf(target), prev: cur ? keyOf(cur) : null, at: Date.now() })); } catch {}
+      toast('正在切换到 ' + (target.email || target.name || '账号') + ' …');
+      setTimeout(() => { if (/^\/agent\/?$/.test(location.pathname)) location.reload(); else location.href = ORIGIN + '/agent'; }, 200);
+      return true;
+    }
     const check = authOf(await listCookies());
     if (check.map(c => c.value).join('') !== target.cookies.map(c => c.value).join('')) { toast('无法写入登录 Cookie（需要 Tampermonkey 的 Cookie 权限，见面板说明），未切换'); return; }
     // 刷新页面前先确认这个登录凭据服务端还认：失效的话 Arena 会退回匿名并报 “Connecting to Arena has failed”
@@ -1242,17 +1265,16 @@
     const x = [...dlg.querySelectorAll('button')].find(b => /close|关闭/i.test(b.getAttribute('aria-label') || '') || (!b.innerText.trim() && b.querySelector('svg') && !b.dataset.ampSwitch && b.getBoundingClientRect().top - dlg.getBoundingClientRect().top < 40));
     if (x) x.click(); else dlg.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
   }
-  let closeSwitcher = () => {};
-  async function openPanel(host) {
+  function openPanel(host) {
     notifyModalState(true);
     if (host) closeDialog(host);
-    await syncCurrent();
     document.querySelector('[data-amp-switcher]')?.remove();
     if (!document.getElementById('amp-switcher-css')) { const st = el('style', null, SW_CSS, document.head || document.documentElement); st.id = 'amp-switcher-css'; }
     const list = [...accounts].sort((a, b) => (keyOf(b) === currentId) - (keyOf(a) === currentId) || (a.addedAt || 0) - (b.addedAt || 0));
     const items = list.map(a => ({ a }));
     let sel = 0, busy = false, wheelAt = 0;
     const root = el('div', null, null, document.body); root.dataset.ampSwitcher = '1'; root.tabIndex = -1;
+    void syncCurrent();
     const top = el('div', null, null, root); top.className = 'sw-top';
     el('div', null, currentId ? '切换账号' : '选择账号登录', top).className = 'sw-title';
     el('div', null, list.length ? list.length + ' 个已保存账号 · 点头像或按 Enter 切换' : '还没有保存的账号', top).className = 'sw-sub';
@@ -1396,7 +1418,7 @@
       const d = nodes[sel]; if (!d || busy) return;
       if (d.it.add) { closeSwitcher(); void addAccount(); return; }
       if (keyOf(d.it.a) === currentId) { closeSwitcher(); toast('已经是当前账号'); return; }
-      if (d.it.a.invalid && !d.it.a.pw) { closeSwitcher(); openLoginForm(accounts.find(a => keyOf(a) === currentId) || null, { email: d.it.a.email, note: '该账号登录已失效，请重新输入密码' }); return; }
+      if (!d.it.a.cookies?.length && !d.it.a.pw) { closeSwitcher(); openLoginForm(accounts.find(a => keyOf(a) === currentId) || null, { email: d.it.a.email, note: '该账号没有保存登录凭据，请重新输入密码' }); return; }
       busy = true; clearNear(); d.n.classList.add('go');
       const nm = d.inn.querySelector('.sw-nm'); if (nm) nm.textContent = '切换中…';
       await new Promise(r => setTimeout(r, 380));
@@ -1451,42 +1473,27 @@
   }
   let floater = null;
   function paintFloater() {
-    const need = !currentId && cookieMode !== 'hidden' && accounts.some(a => a.cookies?.length) && !profileDialog() && !domIdentity().email && !replaceLogin();
-    if (!need) { floater?.remove(); floater = null; return; }
-    if (floater?.isConnected) return;
-    floater = el('button', 'position:fixed;left:24px;bottom:34px;z-index:2147483645;padding:7px 12px;border-radius:999px;border:1px solid ' + (dark() ? '#3f3d39' : '#e5e1da') + ';cursor:pointer;font:12.5px system-ui,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.12);' + (dark() ? 'background:#2c2b28;color:#ecebe7' : 'background:#fff;color:#262522'), '切换到已保存账号（' + accounts.length + '）', document.body);
-    floater.type = 'button'; floater.onclick = () => void openPanel(null);
+    floater?.remove();
+    floater = null;
   }
 
   let topAvatarBtn = null;
   function ensureTopAvatar() {
     const suiteAvatar = document.getElementById('amp-avatar');
     if (suiteAvatar && suiteAvatar.isConnected) {
-      if (topAvatarBtn && topAvatarBtn.isConnected) {
-        topAvatarBtn.remove();
-        topAvatarBtn = null;
-      }
+      document.querySelectorAll('#amp-switch-fallback-avatar').forEach(e => e.remove());
+      topAvatarBtn = null;
       return;
     }
-    if (topAvatarBtn && topAvatarBtn.isConnected) return;
-    let anchor = null;
-    const candidates = document.querySelectorAll('main button[aria-label*="workspace" i], main button[aria-label*="工作区"], main button[aria-label="Open sidebar"], header button');
-    for (const b of candidates) {
-      const r = b.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0 && r.top >= 0 && r.top < 80) {
-        anchor = b;
-        if (/workspace|工作区/i.test(b.getAttribute('aria-label') || '')) {
-          break;
-        }
-      }
-    }
-    if (!anchor) return;
+    if (document.getElementById('amp-switch-fallback-avatar')) return;
+    const rightContainer = document.querySelector('main div.grid:has(> div > button[aria-label="Open sidebar"]) > div:last-child, header > div:last-child, main header > div:last-child');
+    if (!rightContainer) return;
     topAvatarBtn = document.createElement('button');
     topAvatarBtn.id = 'amp-switch-fallback-avatar';
     topAvatarBtn.type = 'button';
     topAvatarBtn.title = '切换 / 登录账号';
     topAvatarBtn.setAttribute('aria-label', '切换 / 登录账号');
-    topAvatarBtn.style.cssText = 'all:initial;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;cursor:pointer;margin:0 4px;vertical-align:middle;box-shadow:inset 0 0 0 1.5px ' + (dark() ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.15)') + ';background:' + (dark() ? '#2c2b28' : '#fff') + ';color:' + (dark() ? '#ecebe7' : '#262522') + ';-webkit-tap-highlight-color:transparent;z-index:10;';
+    topAvatarBtn.style.cssText = 'all:initial;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;cursor:pointer;margin:0 4px;vertical-align:middle;box-shadow:inset 0 0 0 1.5px ' + (dark() ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.15)') + ';background:' + (dark() ? '#2c2b28' : '#fff') + ';color:' + (dark() ? '#ecebe7' : '#262522') + ';-webkit-tap-highlight-color:transparent;z-index:10;order:3;';
     const curAcc = currentId ? find(currentId) : null;
     if (curAcc?.avatar) {
       topAvatarBtn.innerHTML = '<img src="' + curAcc.avatar + '" style="width:26px;height:26px;border-radius:50%;object-fit:cover;display:block;" alt="">';
@@ -1502,7 +1509,7 @@
       if (document.querySelector('[data-amp-switcher]')) closeSwitcher();
       else void openPanel(null);
     };
-    anchor.after(topAvatarBtn);
+    rightContainer.appendChild(topAvatarBtn);
   }
 
   // ---------------- 启动 ----------------

@@ -21,6 +21,8 @@ import android.os.Bundle;
 import android.os.Message;
 import android.provider.MediaStore;
 import android.util.TypedValue;
+import org.json.JSONArray;
+import org.json.JSONObject;
 import java.util.ArrayList;
 import java.util.List;
 import android.view.Gravity;
@@ -137,7 +139,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         try {
             SharedPreferences sp = getSharedPreferences("app_meta", MODE_PRIVATE);
             int lastVer = sp.getInt("last_apk_version", 0);
-            if (lastVer < 28) {
+            if (lastVer < 29) {
                 File brokenSuite = new File(getFilesDir(), "arena_suite_latest.js");
                 if (brokenSuite.exists()) brokenSuite.delete();
                 File brokenTmp = new File(getFilesDir(), "arena_suite_latest.tmp");
@@ -146,7 +148,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                 if (brokenSwitch.exists()) brokenSwitch.delete();
                 File brokenSwitchTmp = new File(getFilesDir(), "arena_account_switch_latest.tmp");
                 if (brokenSwitchTmp.exists()) brokenSwitchTmp.delete();
-                sp.edit().putInt("last_apk_version", 28).apply();
+                sp.edit().putInt("last_apk_version", 29).apply();
             }
         } catch (Throwable ignored) {}
 
@@ -1066,25 +1068,31 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                 if (raw == null || raw.isEmpty()) {
                     raw = cm.getCookie("https://arena.ai/");
                 }
+                if (raw == null || raw.isEmpty()) {
+                    raw = cm.getCookie("https://arena.ai");
+                }
                 if (raw == null || raw.isEmpty()) return "[]";
-                StringBuilder sb = new StringBuilder("[");
+                JSONArray arr = new JSONArray();
                 String[] parts = raw.split(";\\s*");
-                boolean first = true;
                 for (int i = 0; i < parts.length; i++) {
                     String part = parts[i];
                     int eq = part.indexOf('=');
                     if (eq > 0) {
                         String k = part.substring(0, eq).trim();
                         String v = part.substring(eq + 1).trim();
-                        if (!first) sb.append(",");
-                        first = false;
-                        sb.append("{\"name\":\"").append(escapeJson(k))
-                          .append("\",\"value\":\"").append(escapeJson(v))
-                          .append("\",\"domain\":\"arena.ai\",\"path\":\"/\",\"secure\":true,\"httpOnly\":false,\"hostOnly\":true,\"sameSite\":\"lax\"}");
+                        JSONObject obj = new JSONObject();
+                        obj.put("name", k);
+                        obj.put("value", v);
+                        obj.put("domain", "arena.ai");
+                        obj.put("path", "/");
+                        obj.put("secure", true);
+                        obj.put("httpOnly", false);
+                        obj.put("hostOnly", true);
+                        obj.put("sameSite", "lax");
+                        arr.put(obj);
                     }
                 }
-                sb.append("]");
-                return sb.toString();
+                return arr.toString();
             } catch (Throwable ignored) {}
             return "[]";
         }
@@ -1095,11 +1103,13 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
             try {
                 CookieManager cm = CookieManager.getInstance();
                 String p = (path != null && !path.isEmpty()) ? path : "/";
-                String target = (url != null && !url.isEmpty()) ? url : "https://arena.ai/";
-                cm.setCookie(target, name + "=; Path=" + p + "; Expires=Thu, 01 Jan 1970 00:00:00 GMT");
-                cm.setCookie("https://arena.ai/", name + "=; Path=" + p + "; Expires=Thu, 01 Jan 1970 00:00:00 GMT");
-                cm.setCookie("https://arena.ai/", name + "=; Domain=arena.ai; Path=" + p + "; Expires=Thu, 01 Jan 1970 00:00:00 GMT");
-                cm.setCookie("https://arena.ai/", name + "=; Domain=.arena.ai; Path=" + p + "; Expires=Thu, 01 Jan 1970 00:00:00 GMT");
+                String delHeader = name + "=; Path=" + p + "; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
+                cm.setCookie("https://arena.ai", delHeader);
+                cm.setCookie("https://arena.ai/", delHeader);
+                cm.setCookie("https://arena.ai", delHeader + "; Domain=arena.ai");
+                cm.setCookie("https://arena.ai/", delHeader + "; Domain=arena.ai");
+                cm.setCookie("https://arena.ai", delHeader + "; Domain=.arena.ai");
+                cm.setCookie("https://arena.ai/", delHeader + "; Domain=.arena.ai");
                 cm.flush();
             } catch (Throwable ignored) {}
         }
@@ -1110,18 +1120,14 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
             try {
                 CookieManager cm = CookieManager.getInstance();
                 String p = (path != null && !path.isEmpty()) ? path : "/";
-                String target = (url != null && !url.isEmpty()) ? url : "https://arena.ai/";
-                StringBuilder header = new StringBuilder();
-                header.append(name).append("=").append(value != null ? value : "");
-                header.append("; Path=").append(p);
-                if (domain != null && !domain.isEmpty()) {
-                    header.append("; Domain=").append(domain);
-                }
-                header.append("; Max-Age=34560000");
-                if (secure) header.append("; Secure");
-                if (httpOnly) header.append("; HttpOnly");
-                header.append("; SameSite=Lax");
-                cm.setCookie(target, header.toString());
+                String val = (value != null) ? value : "";
+                String baseHeader = name + "=" + val + "; Path=" + p + "; Max-Age=34560000; Secure; SameSite=Lax";
+                cm.setCookie("https://arena.ai", baseHeader);
+                cm.setCookie("https://arena.ai/", baseHeader);
+                cm.setCookie("https://www.arena.ai", baseHeader);
+                String dom = (domain != null && !domain.isEmpty()) ? domain : "arena.ai";
+                cm.setCookie("https://arena.ai", baseHeader + "; Domain=" + dom);
+                cm.setCookie("https://arena.ai/", baseHeader + "; Domain=" + dom);
                 cm.flush();
             } catch (Throwable ignored) {}
         }
