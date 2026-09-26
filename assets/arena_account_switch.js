@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Arena 账号切换（Arena Native Suite 配套）
 // @namespace    local.amp.native.accounts
-// @version      1.0.20
-// @description  在 Arena 个人卡片里一键切换已保存的账号；显示各账号最近记录的额度
+// @version      1.0.25
+// @description  【测试版】在 Arena 个人卡片里一键切换已保存的账号；显示各账号最近记录的额度；一键导出/导入账号合集
 // @match        https://arena.ai/*
 // @include      https://arena.ai/*
 // @run-at       document-idle
@@ -14,13 +14,13 @@
 // @grant        GM_registerMenuCommand
 // @grant        GM_setClipboard
 // @noframes
-// @downloadURL  https://raw.githubusercontent.com/755287249/-/main/Arena-Account-Switch.user.js
-// @updateURL    https://raw.githubusercontent.com/755287249/-/main/Arena-Account-Switch.user.js
+// @downloadURL  https://raw.githubusercontent.com/755287249/-/main/test/Arena-Account-Switch.user.js
+// @updateURL    https://raw.githubusercontent.com/755287249/-/main/test/Arena-Account-Switch.user.js
 // ==/UserScript==
 
 (function arenaAccountSwitch() {
   'use strict';
-  const VERSION = '1.0.20';
+  const VERSION = '1.0.25';
   try { document.documentElement.dataset.ampSwitchVer = VERSION; } catch {}
   const ORIGIN = 'https://' + location.host;
   const AUTH_RE = /^arena-auth-prod-v1(\.\d+)?$/;
@@ -498,7 +498,7 @@
     const cancel = el('button', null, '取消', row); cancel.type = 'button'; cancel.className = 'lf-link';
     const native = el('button', null, '改用 Arena 登录页', row); native.type = 'button'; native.className = 'lf-link'; native.title = '需要 Google 登录或验证码时使用';
     let busy = false;
-    const close = () => { removeEventListener('keydown', onKey, true); root.classList.remove('on'); setTimeout(() => root.remove(), 260); };
+    const close = () => { notifyModalState(false); removeEventListener('keydown', onKey, true); root.classList.remove('on'); setTimeout(() => root.remove(), 260); };
     const onKey = e => { if (!root.isConnected) return; if (e.key === 'Escape' && !busy) { e.preventDefault(); e.stopPropagation(); close(); } else if (root.contains(e.target)) e.stopPropagation(); };
     addEventListener('keydown', onKey, true);
     for (const t of ['keyup', 'keypress']) root.addEventListener(t, e => e.stopPropagation());
@@ -524,7 +524,7 @@
       try { sessionStorage.setItem(PENDING, JSON.stringify({ key: keyOf(rec), at: Date.now() })); } catch {}
       setTimeout(() => { if (/^\/agent\/?$/.test(location.pathname)) location.reload(); else location.href = ORIGIN + '/agent'; }, 450);
     };
-    requestAnimationFrame(() => requestAnimationFrame(() => { root.classList.add('on'); (preset.email ? pwd : email).focus(); }));
+    notifyModalState(true); requestAnimationFrame(() => requestAnimationFrame(() => { root.classList.add('on'); (preset.email ? pwd : email).focus(); }));
   }
   // 账号密码备忘录：列出所有已保存账号的邮箱和备忘密码
   function openMemo() {
@@ -553,13 +553,322 @@
     }
     if (!all.length) el('div', null, '还没有保存的账号', list).className = 'lf-s';
     const row = el('div', null, null, card); row.className = 'lf-row';
-    const close = () => { removeEventListener('keydown', onKey, true); root.classList.remove('on'); setTimeout(() => root.remove(), 260); };
+    const close = () => { notifyModalState(false); removeEventListener('keydown', onKey, true); root.classList.remove('on'); setTimeout(() => root.remove(), 260); };
     btn(row, '复制全部（邮箱 密码）', b => copyText(all.map(a => a.email + (a.pw ? ' ' + a.pw : '')).join('\n'), b)).className = 'lf-link';
     const c = el('button', null, '关闭', row); c.type = 'button'; c.className = 'lf-link'; c.onclick = close;
     const onKey = e => { if (!root.isConnected) return; if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); } };
     addEventListener('keydown', onKey, true);
     root.addEventListener('mousedown', e => { if (e.target === root) close(); });
+    notifyModalState(true);
     requestAnimationFrame(() => requestAnimationFrame(() => root.classList.add('on')));
+  }
+  // ---------------- 导出 / 导入账号合集 ----------------
+  // 导出：把所有已保存账号（邮箱、备忘密码、登录凭据）打包成一段文本，直接复制到剪贴板
+  // 导入：粘贴这段文本（或每行“邮箱 密码”），逐个自动登录并保存；有密码优先用密码登录（新会话，不影响原设备），
+  //       没有密码或密码登录失败时才用导出的登录凭据（Cookie）连接
+  const PACK_PREFIX = 'ARENA-ACCOUNTS-V1:';
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const utf8b64 = s => btoa(unescape(encodeURIComponent(s)));
+  const b64utf8 = s => decodeURIComponent(escape(atob(s.replace(/\s+/g, ''))));
+  const cookieRec = c => ({ name: c.name, value: c.value, domain: c.domain, path: c.path, secure: c.secure, httpOnly: c.httpOnly, hostOnly: c.hostOnly, sameSite: c.sameSite, expirationDate: c.expirationDate, fromDocument: !!c.fromDocument });
+  const jarSig = l => (l || []).map(c => c.value).join('');
+  let importBusy = false; // 导入进行中：暂停定时同步，避免把别的账号的 Cookie / 额度写错位置
+
+  async function exportAccounts(btn) {
+    try { const cur = await syncCurrent(); mirrorOut(cur); } catch {}
+    const all = load().filter(a => a.pw || a.cookies?.length).sort((a, b) => (a.addedAt || 0) - (b.addedAt || 0));
+    if (!all.length) { toast('还没有可导出的账号'); return; }
+    const pack = {
+      v: 1, from: location.host, at: Date.now(),
+      accounts: all.map(a => ({ email: a.email, pw: a.pw || undefined, name: a.name || undefined, avatar: a.avatar || undefined, id: a.id || undefined, addedAt: a.addedAt || undefined, invalid: a.invalid ? true : undefined, cookies: a.cookies?.length ? a.cookies : undefined })),
+    };
+    copyText(PACK_PREFIX + utf8b64(JSON.stringify(pack)), btn);
+    const np = all.filter(a => a.pw).length, nop = all.length - np;
+    toast('已复制 ' + all.length + ' 个账号到剪贴板（' + np + ' 个带密码）。内含密码和登录凭据，请勿发给他人'
+      + (nop ? '。另有 ' + nop + ' 个账号没记录密码：登录凭据有时效，失效后只能手动输密码，建议先在“备忘录”里补上密码再导出' : ''));
+  }
+
+  const LINE_RE = /^\s*([^\s@:|,;]+@[^\s@:|,;]+\.[^\s@:|,;]+)(?:\s*(?:----|[\t :|,;])\s*(.*?))?\s*$/;
+  function parsePack(text) {
+    text = String(text || '').trim();
+    if (!text) return { error: '请先粘贴账号合集' };
+    let j = null;
+    const i = text.indexOf(PACK_PREFIX);
+    if (i >= 0) {
+      try { j = JSON.parse(b64utf8(text.slice(i + PACK_PREFIX.length).trim())); }
+      catch { return { error: '账号合集内容不完整或已损坏，请重新点“导出账号合集”复制' }; }
+    } else if (/^[[{]/.test(text)) {
+      j = parseJ(text); if (!j) return { error: 'JSON 格式不正确' };
+    }
+    let list = [];
+    if (j) list = Array.isArray(j) ? j : Array.isArray(j.accounts) ? j.accounts : [];
+    else for (const line of text.split(/\r?\n/)) { const m = line.replace(/-{4,}/, ' ').match(LINE_RE); if (m) list.push({ email: m[1], pw: m[2] || undefined }); }
+    const by = new Map();
+    for (const a of list) {
+      const k = emailKey(a); if (!EMAIL.test(k)) continue;
+      const ck = Array.isArray(a.cookies) ? a.cookies.filter(c => c && AUTH_RE.test(String(c.name || '')) && typeof c.value === 'string') : [];
+      const o = by.get(k) || {};
+      by.set(k, { ...o, ...a, email: String(a.email).trim(), pw: (typeof a.pw === 'string' && a.pw) || o.pw, cookies: ck.length ? ck : o.cookies });
+    }
+    const out = [...by.values()];
+    if (!out.length) return { error: '没有识别到账号。支持：导出的账号合集，或每行“邮箱 密码”' };
+    return { list: out };
+  }
+
+  // 把登录 Cookie 整体换成 list（空数组 = 清空）
+  async function setJar(list) {
+    for (const c of authOf(await listCookies())) await delCookie(c);
+    for (const c of list || []) { const err = await setCookie(c); if (err) return String(err); }
+    return '';
+  }
+
+  async function importOne(a, opt, stage) {
+    const k = emailKey(a);
+    const local = load().find(x => keyOf(x) === k);
+    if (opt.skip && local && !local.invalid && local.cookies?.length) {
+      if (opt.remember && a.pw && a.pw !== local.pw) mutate(l => { const x = l.find(y => keyOf(y) === k); if (x) x.pw = a.pw; });
+      return { ok: true, skipped: true };
+    }
+    if (!a.pw && local?.pw) a = { ...a, pw: local.pw }; // 本机备忘录里有密码也能用
+    let err = '', wrong = false;
+    if (a.pw) {
+      stage('正在用密码登录…');
+      let r = await signInEmail(a.email, a.pw, { remember: opt.remember });
+      if (r.error && /频繁/.test(r.error)) { stage('请求过于频繁，10 秒后重试…'); await sleep(10000); r = await signInEmail(a.email, a.pw, { remember: opt.remember }); }
+      if (r.rec) {
+        if ((!r.rec.name && a.name) || (!r.rec.avatar && a.avatar)) upsert({ email: r.rec.email, name: r.rec.name ? null : a.name, avatar: r.rec.avatar ? null : a.avatar });
+        return { ok: true, via: 'pw', rec: find(k) || r.rec };
+      }
+      err = r.error || '密码登录失败'; wrong = !!r.wrong;
+    }
+    if (a.cookies?.length) {
+      stage(a.pw ? '密码登录失败，改用登录凭据连接…' : '正在用登录凭据连接…');
+      const prev = authOf(await listCookies());
+      const e1 = await setJar(a.cookies);
+      if (e1) { await setJar(prev); return { ok: false, error: (err ? err + '；' : '') + '写入 Cookie 失败：' + e1 }; }
+      if (jarSig(authOf(await listCookies())) !== jarSig(a.cookies)) { await setJar(prev); return { ok: false, error: '无法写入登录 Cookie（需要 Tampermonkey 的 Cookie 权限）' }; }
+      const v = await verifySession({ email: a.email, id: a.id });
+      if (v === false) { await setJar(prev); return { ok: false, needPw: true, error: (err ? err + '；登录凭据也已失效' : '登录凭据已失效（有时效），且没有记录密码') + ' · 在下面输入密码即可登录并更新凭据' }; }
+      const fresh = authOf(await listCookies());
+      const s = decodeSession(fresh);
+      const rec = upsert({ id: s.id || a.id || null, email: a.email, name: a.name || s.name, avatar: a.avatar || s.avatar, cookies: (fresh.length ? fresh : a.cookies).map(cookieRec), exp: s.exp, savedAt: Date.now(), pw: opt.remember && a.pw && !wrong ? a.pw : null });
+      return { ok: true, via: v === null ? 'cookie?' : 'cookie', rec };
+    }
+    return { ok: false, needPw: true, error: err ? err + ' · 可在下面重新输入密码' : '没有密码也没有登录凭据 · 在下面输入密码即可登录' };
+  }
+
+  // 逐个导入；结束后恢复原来的登录（原来未登录则进入最后一个成功的账号）
+  async function runImport(list, opt, onRow) {
+    importBusy = true; switchingNow = true;
+    const results = [];
+    let origAcc = null, origJar = [], lastOk = null;
+    try {
+      origAcc = await syncCurrent(); mirrorOut(origAcc);
+      origJar = authOf(await listCookies());
+      for (let i = 0; i < list.length; i++) {
+        const a = list[i];
+        onRow(i, 'run', '准备中…');
+        let r;
+        try { r = await importOne(a, opt, t => onRow(i, 'run', t)); }
+        catch (e) { r = { ok: false, error: String(e?.message || e) }; }
+        if (r.ok && !r.skipped) {
+          lastOk = emailKey(a);
+          // 期间 Arena 可能已轮换令牌：再读一次最新 Cookie 写回这个账号
+          try {
+            const fresh = authOf(await listCookies()), s = decodeSession(fresh);
+            if (fresh.length && String(s.email || '').toLowerCase() === lastOk) mutate(l => { const x = l.find(y => keyOf(y) === lastOk); if (x) { x.cookies = fresh.map(cookieRec); x.savedAt = Date.now(); delete x.invalid; } });
+          } catch {}
+        }
+        onRow(i, r.ok ? 'ok' : 'err', r.skipped ? '本机已有，已跳过' : r.ok ? (r.via === 'pw' ? '已登录并保存' : r.via === 'cookie?' ? '已保存（网络原因未能验证）' : '已通过登录凭据连接并保存') : r.error);
+        results.push(r);
+        if (r.ok && !r.skipped && i < list.length - 1) await sleep(900);
+      }
+    } finally {
+      let enter = null;
+      try {
+        if (origAcc) {
+          if (jarSig(authOf(await listCookies())) !== jarSig(origJar)) await setJar(origJar);
+          const o = find(keyOf(origAcc)); if (o) { mirrorIn(o); markDirty(); }
+          await syncCurrent();
+        } else if (lastOk && find(lastOk)?.cookies?.length) {
+          enter = find(lastOk);
+          if (jarSig(authOf(await listCookies())) !== jarSig(enter.cookies)) await setJar(enter.cookies);
+        } else if (jarSig(authOf(await listCookies())) !== jarSig(origJar)) await setJar(origJar);
+      } catch (e) { log('导入后恢复登录失败', e); }
+      importBusy = false; switchingNow = false;
+      results.enter = enter;
+    }
+    return results;
+  }
+  function enterAccount(rec) {
+    mirrorIn(rec); markDirty();
+    window.addEventListener('pagehide', () => mirrorIn(rec), { once: true }); carryArm(carryOut());
+    try { sessionStorage.setItem(PENDING, JSON.stringify({ key: keyOf(rec), at: Date.now() })); } catch {}
+    toast('正在进入 ' + (rec.email || '账号') + ' …');
+    setTimeout(() => { if (/^\/agent\/?$/.test(location.pathname)) location.reload(); else location.href = ORIGIN + '/agent'; }, 300);
+  }
+
+  const IMP_CSS = `
+[data-amp-login-form] .imp-card{width:min(480px,calc(100vw - 24px))}
+[data-amp-login-form] textarea.imp-ta{width:100%;height:120px;box-sizing:border-box;resize:vertical;padding:10px 12px;border-radius:10px;border:0;outline:none;font:12px/1.5 ui-monospace,Consolas,monospace;color:#f3f1ec;background:rgba(255,255,255,.07);box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);word-break:break-all}
+[data-amp-login-form] textarea.imp-ta:focus{background:rgba(255,255,255,.1);box-shadow:inset 0 0 0 1.5px #d8d3ca}
+[data-amp-login-form] textarea.imp-ta::placeholder{color:rgba(243,241,236,.35);font-family:inherit}
+[data-amp-login-form] .imp-bar{display:flex;justify-content:space-between;align-items:center;margin:6px 2px 10px;font-size:12px;color:rgba(243,241,236,.55)}
+[data-amp-login-form] .imp-list{max-height:min(38vh,300px);overflow:auto;margin:0 -6px 10px;padding:0 6px}
+[data-amp-login-form] .imp-list:empty{display:none}
+[data-amp-login-form] .imp-st{font-size:11.5px;margin-top:2px;color:rgba(243,241,236,.5);word-break:break-all}
+[data-amp-login-form] .imp-st.run{color:#e8d49a}[data-amp-login-form] .imp-st.ok{color:#a8d8a8}[data-amp-login-form] .imp-st.err{color:#f2a39b}
+[data-amp-login-form] .imp-dot{width:8px;height:8px;border-radius:50%;flex:none;background:rgba(255,255,255,.2)}
+[data-amp-login-form] .imp-dot.run{background:#e8d49a;animation:swp 1s ease-in-out infinite}[data-amp-login-form] .imp-dot.ok{background:#8fd18f}[data-amp-login-form] .imp-dot.err{background:#e0493a}
+[data-amp-login-form] .imp-pw{display:flex;gap:6px;margin-top:6px}
+[data-amp-login-form] .imp-pw input{height:30px;font-size:12.5px;padding:0 10px;border-radius:8px}
+[data-amp-login-form] .imp-pw .lf-mb{flex:none;padding:0 12px;font-size:12px;border-radius:8px;background:#d8d3ca;color:#262522;font-weight:600}
+[data-amp-login-form] .imp-pw .lf-mb:hover{background:#e8e3da;color:#262522}
+[data-amp-login-form] .imp-pw .lf-mb[disabled]{opacity:.6;cursor:default}
+@keyframes swp{50%{opacity:.35}}
+`;
+  function openImport(prefill) {
+    document.querySelector('[data-amp-login-form]')?.remove();
+    for (const [id, css] of [['amp-login-css', LOGIN_CSS], ['amp-imp-css', IMP_CSS]]) if (!document.getElementById(id)) { const st = el('style', null, css, document.head || document.documentElement); st.id = id; }
+    const root = el('div', null, null, document.body); root.dataset.ampLoginForm = '1';
+    const card = el('div', null, null, root); card.className = 'lf-card imp-card';
+    const ic = el('div', null, null, card); ic.className = 'lf-ic';
+    ic.innerHTML = '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>';
+    el('div', null, '导入账号', card).className = 'lf-t';
+    el('div', null, '粘贴“导出账号合集”复制的内容（也支持每行“邮箱 密码”），将自动逐个登录并保存', card).className = 'lf-s';
+    const ta = el('textarea', null, null, card); ta.className = 'imp-ta'; ta.spellcheck = false;
+    ta.placeholder = '在这里粘贴（Ctrl+V / ⌘V）\n\nARENA-ACCOUNTS-V1:……\n或者：\nname@example.com 密码\nfoo@bar.com 密码';
+    const bar = el('div', null, null, card); bar.className = 'imp-bar';
+    const cnt = el('span', null, '', bar);
+    const pasteB = el('button', null, '从剪贴板粘贴', bar); pasteB.type = 'button'; pasteB.className = 'lf-link';
+    const rl = el('label', null, null, card); rl.className = 'lf-rem';
+    const remember = el('input', null, null, rl); remember.type = 'checkbox'; remember.checked = GM_getValue('rememberPw', true) !== false;
+    el('span', null, '记住密码（写入本机账号备忘录）', rl);
+    const sl = el('label', null, null, card); sl.className = 'lf-rem';
+    const skip = el('input', null, null, sl); skip.type = 'checkbox'; skip.checked = true;
+    el('span', null, '跳过本机已保存且有效的账号', sl);
+    const listBox = el('div', null, null, card); listBox.className = 'lf-list imp-list';
+    const msg = el('div', null, '', card); msg.className = 'lf-msg';
+    const go = el('button', null, null, card); go.type = 'button'; go.className = 'lf-go';
+    const row = el('div', null, null, card); row.className = 'lf-row';
+    el('span', null, '', row);
+    const cancel = el('button', null, '取消', row); cancel.type = 'button'; cancel.className = 'lf-link';
+
+    let busy = false, parsed = null, pending = null, enter = null, done = false;
+    const setGo = (label, spin) => { go.disabled = !!spin; go.innerHTML = (spin ? '<span class="lf-spin"></span>' : '') + '<span>' + label + '</span>'; };
+    setGo('导入并登录');
+    const refresh = () => {
+      if (busy) return;
+      if (done) { done = false; pending = null; setGo('导入并登录'); cancel.textContent = enter ? '跳过，进入 ' + enter.email : '取消'; }
+      const t = ta.value.trim(); msg.className = 'lf-msg'; msg.textContent = '';
+      if (!t) { parsed = null; cnt.textContent = ''; return; }
+      parsed = parsePack(t);
+      if (parsed.error) { cnt.textContent = ''; msg.textContent = parsed.error; return; }
+      const np = parsed.list.filter(a => a.pw).length, nc = parsed.list.filter(a => !a.pw && a.cookies?.length).length, nn = parsed.list.length - np - nc;
+      cnt.textContent = '识别到 ' + parsed.list.length + ' 个账号' + (np ? ' · ' + np + ' 个有密码' : '') + (nc ? ' · ' + nc + ' 个仅凭据' : '') + (nn ? ' · ' + nn + ' 个无法登录' : '');
+    };
+    ta.addEventListener('input', refresh);
+    const fillFromClipboard = async quiet => {
+      try {
+        const t = await navigator.clipboard.readText();
+        if (!t || !t.trim()) { if (!quiet) msg.textContent = '剪贴板是空的'; return; }
+        if (quiet && !t.includes(PACK_PREFIX)) return;
+        ta.value = t.trim(); refresh();
+      } catch { if (!quiet) { msg.className = 'lf-msg'; msg.textContent = '浏览器不允许读取剪贴板，请在输入框里按 Ctrl+V / ⌘V 粘贴'; ta.focus(); } }
+    };
+    pasteB.onclick = () => { if (!busy) void fillFromClipboard(false); };
+    if (prefill) { ta.value = prefill; refresh(); }
+    else { try { navigator.permissions?.query({ name: 'clipboard-read' }).then(p => { if (p.state === 'granted' && !ta.value) void fillFromClipboard(true); }, () => {}); } catch {} }
+
+    const rowEls = [];
+    const paintList = list => {
+      listBox.textContent = ''; rowEls.length = 0;
+      for (const a of list) {
+        const r = el('div', null, null, listBox); r.className = 'lf-it';
+        const dot = el('i', null, null, r); dot.className = 'imp-dot';
+        const l = el('div', null, null, r); l.className = 'lf-l';
+        el('div', null, a.email, l).className = 'lf-e';
+        const st = el('div', null, a.pw ? '等待中 · 有密码' : a.cookies?.length ? '等待中 · 仅登录凭据' : '等待中 · 无密码', l); st.className = 'imp-st';
+        rowEls.push({ dot, st, r, l, a });
+      }
+    };
+    const onRow = (i, state, text) => {
+      const x = rowEls[i]; if (!x) return;
+      x.dot.className = 'imp-dot ' + state; x.st.className = 'imp-st ' + state; x.st.textContent = text;
+      if (state === 'run') x.r.scrollIntoView({ block: 'nearest' });
+    };
+    // 失败的账号：行内输入密码，登录成功即保存并更新凭据
+    const syncPending = () => {
+      if (!pending || !pending.length) pending = null;
+      if (!done) return;
+      setGo(pending ? '重试失败的 ' + pending.length + ' 个' : enter ? '完成并进入 ' + enter.email : '完成');
+      cancel.textContent = pending ? (enter ? '跳过，进入 ' + enter.email : '关闭') : '关闭';
+    };
+    const addPwForm = i => {
+      const x = rowEls[i]; if (!x || x.pwf) return;
+      const f = el('form', null, null, x.l); f.className = 'imp-pw'; f.noValidate = true; x.pwf = f;
+      const inp = el('input', null, null, f); inp.type = 'password'; inp.autocomplete = 'current-password'; inp.placeholder = '输入 ' + x.a.email.split('@')[0] + ' 的密码';
+      const b = el('button', null, '登录', f); b.type = 'submit'; b.className = 'lf-mb';
+      f.onsubmit = async e => {
+        e.preventDefault(); e.stopPropagation();
+        if (busy) return; const pw = inp.value; if (!pw) { inp.focus(); return; }
+        busy = true; inp.disabled = b.disabled = true; go.disabled = true; cancel.style.visibility = 'hidden';
+        const one = { email: x.a.email, pw, name: x.a.name, avatar: x.a.avatar, id: x.a.id };
+        let res = [];
+        try { res = await runImport([one], { remember: true, skip: false }, (j, st, t) => onRow(i, st, t)); } catch (err) { onRow(i, 'err', String(err?.message || err)); }
+        busy = false; go.disabled = false; cancel.style.visibility = '';
+        enter = res.enter || enter;
+        if (res[0]?.ok) {
+          f.remove(); x.pwf = null;
+          pending = (pending || []).filter(y => emailKey(y) !== emailKey(x.a)); syncPending();
+          toast('已登录并保存 ' + x.a.email);
+        } else { inp.disabled = b.disabled = false; inp.select(); inp.focus(); }
+      };
+    };
+    const start = async list => {
+      busy = true; ta.disabled = remember.disabled = skip.disabled = true; cancel.style.visibility = 'hidden';
+      try { GM_setValue('rememberPw', remember.checked); } catch {}
+      msg.className = 'lf-msg'; msg.textContent = '';
+      paintList(list); done = false;
+      setGo('正在导入 1 / ' + list.length + ' …', true);
+      let n = 0; const total = list.length;
+      const res = await runImport(list, { remember: remember.checked, skip: skip.checked }, (i, s, t) => { onRow(i, s, t); if (s !== 'run') n++; setGo('正在导入 ' + Math.min(n + 1, total) + ' / ' + total + ' …', true); });
+      busy = false; cancel.style.visibility = ''; ta.disabled = remember.disabled = skip.disabled = false;
+      const ok = res.filter(r => r.ok && !r.skipped).length, sk = res.filter(r => r.skipped).length;
+      const failed = list.filter((a, i) => !res[i]?.ok);
+      list.forEach((a, i) => { if (!res[i]?.ok) addPwForm(i); });
+      enter = res.enter || enter;
+      msg.className = 'lf-msg' + (failed.length ? '' : ' ok');
+      msg.textContent = '完成：' + ok + ' 个已登录保存' + (sk ? '，' + sk + ' 个已跳过' : '') + (failed.length ? '，' + failed.length + ' 个失败' : '') + (enter ? '。将进入 ' + enter.email : '');
+      pending = failed.length ? failed : null; done = true;
+      setGo(pending ? '重试失败的 ' + failed.length + ' 个' : enter ? '完成并进入 ' + enter.email : '完成');
+      cancel.textContent = pending ? (enter ? '跳过，进入 ' + enter.email : '关闭') : '关闭';
+      toast('导入完成：' + ok + ' 个成功' + (failed.length ? '，' + failed.length + ' 个失败' : ''));
+    };
+    const close = () => {
+      if (busy) return;
+      notifyModalState(false);
+      removeEventListener('keydown', onKey, true); root.classList.remove('on'); setTimeout(() => root.remove(), 260);
+      if (enter) enterAccount(enter);
+    };
+    go.onclick = () => {
+      if (busy) return;
+      if (pending) { const p = pending; pending = null; void start(p); return; }
+      if (done && !pending) { close(); return; }
+      refresh();
+      if (!parsed) { msg.className = 'lf-msg'; msg.textContent = '请先粘贴账号合集'; ta.focus(); return; }
+      if (parsed.error) { root.classList.remove('shake'); void root.offsetWidth; root.classList.add('shake'); return; }
+      const usable = parsed.list.filter(a => a.pw || a.cookies?.length || load().some(x => keyOf(x) === emailKey(a)));
+      if (!usable.length) { msg.className = 'lf-msg'; msg.textContent = '这些账号都没有密码或登录凭据，无法自动登录'; return; }
+      void start(parsed.list);
+    };
+    cancel.onclick = close;
+    const onKey = e => { if (!root.isConnected) return; if (e.key === 'Escape' && !busy) { e.preventDefault(); e.stopPropagation(); close(); } else if (root.contains(e.target)) e.stopPropagation(); };
+    addEventListener('keydown', onKey, true);
+    for (const t of ['keyup', 'keypress', 'paste', 'copy', 'cut']) root.addEventListener(t, e => e.stopPropagation());
+    root.addEventListener('mousedown', e => { if (e.target === root && !busy && !rowEls.length) close(); });
+    notifyModalState(true);
+    requestAnimationFrame(() => requestAnimationFrame(() => { root.classList.add('on'); ta.focus(); }));
   }
   // ---------------- 快捷键：配置界面 ----------------
   const HK_CSS = `
@@ -668,13 +977,13 @@
       saveHk(); renderRows(); say(n ? '已为 ' + n + ' 个账号分配快捷键' : '所有账号都已经有快捷键了', true);
     };
     const closeB = el('button', null, '完成', foot); closeB.type = 'button'; closeB.className = 'lf-link';
-    const close = () => { stopRec(); removeEventListener('keydown', onKey, true); root.classList.remove('on'); setTimeout(() => root.remove(), 260); };
+    const close = () => { notifyModalState(false); stopRec(); removeEventListener('keydown', onKey, true); root.classList.remove('on'); setTimeout(() => root.remove(), 260); };
     closeB.onclick = e => { e.stopPropagation(); close(); };
     const onKey = e => { if (!root.isConnected) return; if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); } };
     addEventListener('keydown', onKey, true);
     for (const t of ['keyup', 'keypress']) root.addEventListener(t, e => e.stopPropagation());
     root.addEventListener('mousedown', e => { if (rec && !rec.kb.contains(e.target)) { stopRec(); say(''); } if (e.target === root) close(); });
-    requestAnimationFrame(() => requestAnimationFrame(() => root.classList.add('on')));
+    notifyModalState(true); requestAnimationFrame(() => requestAnimationFrame(() => root.classList.add('on')));
   }
   // ---------------- 快捷键：全局监听 ----------------
   let hkBusy = false;
@@ -685,7 +994,7 @@
     const isPanel = !!hotkeys.panel && c === hotkeys.panel;
     const accKey = isPanel ? null : Object.keys(hotkeys.accounts).find(k => hotkeys.accounts[k] === c);
     if (!isPanel && !accKey) return;
-    if (document.querySelector('[data-amp-login-form]')) return; // 登录框 / 备忘录 / 快捷键设置打开时不拦截
+    if (importBusy || document.querySelector('[data-amp-login-form]')) return; // 登录框 / 备忘录 / 快捷键设置打开时不拦截
     e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
     if (e.repeat) return;
     if (isPanel) { if (document.querySelector('[data-amp-switcher]')) closeSwitcher(); else void openPanel(null); return; }
@@ -885,42 +1194,42 @@
 [data-amp-switcher] .sw-addb.solo{top:47%;margin-top:-44px}[data-amp-switcher] .sw-addb.solo .sw-addc{width:112px;height:112px}
 [data-amp-switcher] .sw-hint{left:auto!important;right:22px;bottom:18px!important;text-align:right}
 [data-amp-switcher] .sw-warn{bottom:auto;top:138px}
-[data-amp-switcher].vert .sw-top{top:max(14px,4vh)}
-[data-amp-switcher].vert .sw-title{font-size:18px}
-[data-amp-switcher].vert .sw-sub{display:none}
-[data-amp-switcher].vert .sw-stage{top:42%}
+[data-amp-switcher].vert .sw-top{top:58px;left:0;right:0;text-align:center;pointer-events:none;z-index:2}
+[data-amp-switcher].vert .sw-title{font-size:17px;font-weight:600;letter-spacing:.3px}
+[data-amp-switcher].vert .sw-sub{display:block !important;font-size:11.5px;color:rgba(243,241,236,.55);margin-top:2px}
+[data-amp-switcher].vert .sw-stage{top:43%}
 [data-amp-switcher].vert .sw-it .sw-det{display:none}
 [data-amp-switcher].vert .sw-av{width:112px;height:112px;font-size:40px}
 [data-amp-switcher].vert .sw-it{margin-top:-72px}
 [data-amp-switcher].vert .sw-nm{margin-top:7px;font-size:13px}
 [data-amp-switcher].vert .sw-bar{margin-top:10px}
-[data-amp-switcher].vert .sw-mcard{display:block;position:absolute;left:50%;bottom:calc(max(12px,3vh) + 34px);transform:translateX(-50%);width:min(320px,calc(100vw - 40px));padding:12px 14px;box-sizing:border-box;border-radius:14px;
-  background:rgba(255,255,255,.08);box-shadow:inset 0 0 0 1px rgba(255,255,255,.1);text-align:center;transition:opacity .25s ease}
-[data-amp-switcher].vert .sw-mcard .sw-em{max-width:none;font-size:12px;opacity:.85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-[data-amp-switcher].vert .sw-mcard{padding:8px 10px!important;border-radius:12px!important;width:min(300px,calc(100vw - 48px))!important}
-[data-amp-switcher].vert .sw-mcard .sw-memo{margin-top:5px;gap:4px}
-[data-amp-switcher].vert .sw-mcard .sw-rm{margin:0;padding:3px 8px;border-radius:7px;font-size:11px;background:rgba(255,255,255,.06)}
+[data-amp-switcher].vert .sw-mcard{display:block;position:absolute;left:50%;bottom:calc(max(14px, env(safe-area-inset-bottom, 14px)) + 36px);transform:translateX(-50%);width:min(320px, calc(100vw - 32px)) !important;padding:10px 14px !important;box-sizing:border-box;border-radius:14px !important;background:rgba(255,255,255,.09);box-shadow:inset 0 0 0 1px rgba(255,255,255,.12),0 4px 20px rgba(0,0,0,.25);text-align:center;transition:opacity .25s ease}
+[data-amp-switcher].vert .sw-mcard .sw-em{max-width:none;font-size:12.5px;opacity:.9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+[data-amp-switcher].vert .sw-mcard .sw-memo{margin-top:6px;gap:5px}
+[data-amp-switcher].vert .sw-mcard .sw-mb{padding:3px 8px;border-radius:7px;font-size:11.5px}
+[data-amp-switcher].vert .sw-mcard .sw-rm{margin:0;padding:3px 8px;border-radius:7px;font-size:11.5px;background:rgba(255,255,255,.06)}
 [data-amp-switcher].vert .sw-mcard .sw-bad{font-size:11px;margin-top:3px}
-[data-amp-switcher].vert .sw-mside{display:flex;flex-direction:column;align-items:flex-end;justify-content:center;gap:2px;position:absolute;top:42%;right:calc(50% + 72px);transform:translateY(-50%);width:calc(50% - 84px);max-width:150px;text-align:right;pointer-events:none;transition:opacity .25s ease}
+[data-amp-switcher].vert .sw-mside{display:flex;flex-direction:column;align-items:flex-end;justify-content:center;gap:2px;position:absolute;top:43%;right:calc(50% + 72px);transform:translateY(-50%);width:calc(50% - 84px);max-width:140px;text-align:right;pointer-events:none;transition:opacity .25s ease}
 [data-amp-switcher].vert .sw-mside[hidden]{display:none}
-[data-amp-switcher].vert .sw-mside .sw-q0{margin:0;font-size:12px;font-weight:600}
-[data-amp-switcher].vert .sw-mside .sw-q1{margin:2px 0 0;font-size:18px;line-height:1.15;font-weight:700;white-space:nowrap}[data-amp-switcher].vert .sw-mside .sw-q1 small{display:block;font-size:11px;font-weight:500;opacity:.6}
+[data-amp-switcher].vert .sw-mside .sw-q0{margin:0;font-size:11.5px;font-weight:600}
+[data-amp-switcher].vert .sw-mside .sw-q1{margin:2px 0 0;font-size:17px;line-height:1.15;font-weight:700;white-space:nowrap}[data-amp-switcher].vert .sw-mside .sw-q1 small{display:block;font-size:10.5px;font-weight:500;opacity:.6}
 [data-amp-switcher].vert .sw-mside .sw-q2{font-size:11px}
 [data-amp-switcher].vert .sw-mside .sw-q3{font-size:10px;margin-top:2px}
-[data-amp-switcher].vert .sw-arrow{display:none!important;left:auto!important;right:10px!important;width:40px;height:40px;margin-top:-20px}
-[data-amp-switcher].vert .sw-arrow.l{top:calc(42% - 30px)}[data-amp-switcher].vert .sw-arrow.r{top:calc(42% + 30px)}
-[data-amp-switcher].vert .sw-arrow svg{transform:rotate(90deg)}
-[data-amp-switcher].vert .sw-hint{right:12px;bottom:max(10px,2vh)!important;font-size:11px}
-[data-amp-switcher].vert .sw-addb{left:auto;right:12px;top:42%;transform:translateY(-50%);font-size:10.5px;gap:4px;margin:0}
-[data-amp-switcher].vert .sw-addc{width:48px;height:48px}[data-amp-switcher].vert .sw-addc svg{width:22px;height:22px}
+[data-amp-switcher].vert .sw-arrow{display:none!important}
+[data-amp-switcher].vert .sw-hint{left:0 !important;right:0 !important;bottom:max(12px, env(safe-area-inset-bottom, 12px)) !important;text-align:center;font-size:11.5px;color:rgba(243,241,236,.45)}
+[data-amp-switcher].vert .sw-addb{left:auto;right:12px;top:43%;transform:translateY(-50%);font-size:10.5px;gap:4px;margin:0}
+[data-amp-switcher].vert .sw-addc{width:46px;height:46px}[data-amp-switcher].vert .sw-addc svg{width:22px;height:22px}
 [data-amp-switcher].vert .sw-addb:hover{transform:translateY(-50%) scale(1.06)}[data-amp-switcher].vert .sw-addb:active{transform:translateY(-50%) scale(.94)}
 [data-amp-switcher].vert .sw-addb.solo{right:auto;left:50%;transform:translate(-50%,-50%);font-size:13px}[data-amp-switcher].vert .sw-addb.solo .sw-addc{width:112px;height:112px}
-[data-amp-switcher].vert .sw-warn{bottom:auto;top:calc(max(14px,4vh) + 56px);width:calc(100vw - 40px)}
-[data-amp-switcher].vert .sw-close{right:12px;top:12px}
+[data-amp-switcher].vert .sw-warn{display:none !important}
+[data-amp-switcher] .sw-warn{display:none !important}
+[data-amp-switcher].vert .sw-close{right:12px;top:14px;width:34px;height:34px;line-height:34px;font-size:18px;z-index:5}
 [data-amp-switcher].leaving{opacity:0}
-[data-amp-switcher] .sw-tl{position:absolute;left:18px;top:18px;display:flex;gap:8px;z-index:3}
+[data-amp-switcher] .sw-tl{position:absolute;left:18px;top:18px;display:flex;flex-wrap:wrap;gap:8px;max-width:calc(100vw - 90px);z-index:3}
 [data-amp-switcher] .sw-tl .sw-memob{position:static}
-[data-amp-switcher].vert .sw-tl{left:12px;top:12px}
+[data-amp-switcher].vert .sw-tl{left:12px;top:14px;display:flex;flex-wrap:nowrap;gap:6px;max-width:calc(100vw - 64px);z-index:5}
+[data-amp-switcher].vert .sw-tl .sw-hkb{display:none !important}
+[data-amp-switcher].vert .sw-tl .sw-memob{padding:6px 11px;font-size:12px;border-radius:999px;background:rgba(255,255,255,.12);backdrop-filter:blur(4px);white-space:nowrap}
 [data-amp-switcher] .sw-hk{margin-top:4px;padding:1px 7px;border-radius:6px;font:11px/16px ui-monospace,Consolas,monospace;color:rgba(243,241,236,.8);background:rgba(255,255,255,.1);white-space:nowrap}
 [data-amp-switcher].leaving .sw-stage{transform:scale(.96)}
 `;
@@ -935,6 +1244,7 @@
   }
   let closeSwitcher = () => {};
   async function openPanel(host) {
+    notifyModalState(true);
     if (host) closeDialog(host);
     await syncCurrent();
     document.querySelector('[data-amp-switcher]')?.remove();
@@ -947,8 +1257,10 @@
     el('div', null, currentId ? '切换账号' : '选择账号登录', top).className = 'sw-title';
     el('div', null, list.length ? list.length + ' 个已保存账号 · 点头像或按 Enter 切换' : '还没有保存的账号', top).className = 'sw-sub';
     const tl = el('div', null, null, root); tl.className = 'sw-tl';
-    const hkB = el('button', null, '快捷键', tl); hkB.className = 'sw-memob'; hkB.type = 'button'; hkB.title = '给每个账号设置专属快捷键，以及呼出这个界面的快捷键'; hkB.onclick = e => { e.stopPropagation(); closeSwitcher(); openHotkeys(); };
+    const hkB = el('button', null, '快捷键', tl); hkB.className = 'sw-memob sw-hkb'; hkB.type = 'button'; hkB.title = '给每个账号设置专属快捷键，以及呼出这个界面的快捷键'; hkB.onclick = e => { e.stopPropagation(); closeSwitcher(); openHotkeys(); };
     const memoB = el('button', null, '备忘录', tl); memoB.className = 'sw-memob'; memoB.type = 'button'; memoB.title = '查看所有账号和备忘密码'; memoB.onclick = e => { e.stopPropagation(); closeSwitcher(); openMemo(); };
+    const expB = el('button', null, '导出合集', tl); expB.className = 'sw-memob sw-expb'; expB.type = 'button'; expB.title = '把所有已保存账号（含备忘密码和登录凭据）复制到剪贴板'; expB.onclick = e => { e.stopPropagation(); void exportAccounts(expB); };
+    const impB = el('button', null, '导入账号', tl); impB.className = 'sw-memob sw-impb'; impB.type = 'button'; impB.title = '粘贴账号合集，自动登录所有账号并保存'; impB.onclick = e => { e.stopPropagation(); if (busy) return; closeSwitcher(); openImport(); };
     const close = el('button', null, '×', root); close.className = 'sw-close'; close.type = 'button'; close.title = '关闭 (Esc)';
     const stage = el('div', null, null, root); stage.className = 'sw-stage';
     const arrowSvg = d => '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="' + d + '"/></svg>';
@@ -959,7 +1271,7 @@
     addB.innerHTML = '<i class="sw-addc"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></i><span>' + (currentId ? '添加账号' : '其他账号') + '</span>';
     addB.onclick = e => { e.stopPropagation(); if (busy) return; closeSwitcher(); void addAccount(); };
     hint.innerHTML = '<kbd>←</kbd><kbd>→</kbd> 切换 &nbsp;·&nbsp; <kbd>Enter</kbd> 确认 &nbsp;·&nbsp; <kbd>Esc</kbd> 关闭';
-    if (cookieMode !== 'gm') {
+    if (cookieMode !== 'gm' && !(typeof AndroidBridge !== 'undefined')) {
       const w = el('div', null, (cookieMode === 'gm-error' ? '读取 Cookie 出错：' + lastError + '。' : cookieMode === 'hidden' ? '页面已登录，但读不到登录 Cookie（HttpOnly）。' : '当前无法通过扩展读取登录 Cookie。') + '需要 Tampermonkey 支持 HttpOnly Cookie 的版本，并在 设置 → 安全 →“允许脚本访问 Cookie”选“全部”。', root);
       w.className = 'sw-warn';
     }
@@ -1099,7 +1411,7 @@
       if (k === 'ArrowLeft') move(-1); else if (k === 'ArrowRight') move(1); else if (k === 'Escape') closeSwitcher(); else confirmSel();
     };
     window.addEventListener('keydown', onKey, true);
-    closeSwitcher = () => { window.removeEventListener('keydown', onKey, true); root.classList.add('leaving'); root.classList.remove('on'); setTimeout(() => root.remove(), 300); closeSwitcher = () => {}; };
+    closeSwitcher = () => { notifyModalState(false); window.removeEventListener('keydown', onKey, true); root.classList.add('leaving'); root.classList.remove('on'); setTimeout(() => root.remove(), 300); closeSwitcher = () => {}; };
     close.onclick = e => { e.stopPropagation(); closeSwitcher(); };
     root.addEventListener('click', e => { if (e.target === root || e.target === stage) closeSwitcher(); });
     layout();
@@ -1147,8 +1459,10 @@
   }
 
   // ---------------- 启动 ----------------
-  try { GM_registerMenuCommand('Arena 账号切换', () => void openPanel(null)); GM_registerMenuCommand('账号密码备忘录', () => openMemo()); GM_registerMenuCommand('账号快捷键设置', () => openHotkeys()); } catch {}
+  try { GM_registerMenuCommand('Arena 账号切换', () => void openPanel(null)); GM_registerMenuCommand('账号密码备忘录', () => openMemo()); GM_registerMenuCommand('账号快捷键设置', () => openHotkeys()); GM_registerMenuCommand('导出账号合集（复制到剪贴板）', () => void exportAccounts()); GM_registerMenuCommand('导入账号', () => openImport()); } catch {}
   window.addEventListener('keydown', onHotkey, true);
+  // 套件手机顶栏的头像：点一下打开 / 再点关闭账号切换面板（套件 v1.11.68+）
+  window.addEventListener('amp:switch-open', () => { if (document.querySelector('[data-amp-switcher]')) closeSwitcher(); else void openPanel(null); });
   let scanQueued = false;
   const scan = () => { scanQueued = false; const d = profileDialog(); if (d) { injectButton(d); } replaceLogin(); };
   new MutationObserver(recs => { if (scanQueued) return; if (!recs.some(r => { const e = r.target.nodeType === 1 ? r.target : r.target.parentElement; return e && !e.closest('[role="log"]'); })) return; scanQueued = true; requestAnimationFrame(scan); }).observe(document.documentElement, { childList: true, subtree: true });
@@ -1164,6 +1478,7 @@
   // 运行中账号变化（例如在 Arena 登录页登录后没有整页刷新）：通知主脚本刷新限流/脉冲/额度
   let lastSeen, tick = 0;
   const watch = async () => {
+    if (importBusy) return;
     const before = lastSeen; await syncCurrent(); paintFloater();
     if (before !== undefined && currentId !== before) {
       log('账号变化', before, '→', currentId);
@@ -1173,5 +1488,5 @@
   };
   // 未登录时每 5 秒检查一次（尽快识别新登录），已登录时每 60 秒同步一次 Cookie
   setInterval(() => { tick++; if (!currentId || tick % 12 === 0) void watch(); }, 5000);
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') void syncCurrent(); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && !importBusy) void syncCurrent(); });
 })();

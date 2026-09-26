@@ -93,6 +93,8 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
     public static volatile boolean isActivityVisible = false;
     public String suiteScript = "";
     public String accountSwitchScript = "";
+    public int topCutoutOffsetPx = 0;
+    public volatile boolean isModalActive = false;
     public boolean isCurrentDark = false;
     public boolean lastConfigNight = false;
     public boolean needsWebThemeSync = true;
@@ -134,12 +136,16 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         try {
             SharedPreferences sp = getSharedPreferences("app_meta", MODE_PRIVATE);
             int lastVer = sp.getInt("last_apk_version", 0);
-            if (lastVer < 26) {
+            if (lastVer < 27) {
                 File brokenSuite = new File(getFilesDir(), "arena_suite_latest.js");
                 if (brokenSuite.exists()) brokenSuite.delete();
                 File brokenTmp = new File(getFilesDir(), "arena_suite_latest.tmp");
                 if (brokenTmp.exists()) brokenTmp.delete();
-                sp.edit().putInt("last_apk_version", 26).apply();
+                File brokenSwitch = new File(getFilesDir(), "arena_account_switch_latest.js");
+                if (brokenSwitch.exists()) brokenSwitch.delete();
+                File brokenSwitchTmp = new File(getFilesDir(), "arena_account_switch_latest.tmp");
+                if (brokenSwitchTmp.exists()) brokenSwitchTmp.delete();
+                sp.edit().putInt("last_apk_version", 27).apply();
             }
         } catch (Throwable ignored) {}
 
@@ -165,7 +171,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         rootLayout.setOnApplyWindowInsetsListener(this);
 
         // Native 15.5dp top offset on WebView from frame 0 (clears punch-hole camera above 'opus-5.5' without any post-load jump)
-        int topCutoutOffsetPx = Math.round(15.5f * density);
+        topCutoutOffsetPx = Math.round(15.5f * density);
 
         // WebView
         webView = new WebView(this);
@@ -524,13 +530,37 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         webView.evaluateJavascript(js, null);
     }
 
+    public void updateFullscreenModalState(boolean isModalOpen) {
+        this.isModalActive = isModalOpen;
+        if (webView != null) {
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) webView.getLayoutParams();
+            if (lp != null) {
+                int targetMargin = isModalOpen ? 0 : topCutoutOffsetPx;
+                if (lp.topMargin != targetMargin) {
+                    lp.topMargin = targetMargin;
+                    webView.setLayoutParams(lp);
+                }
+            }
+        }
+        if (rootLayout != null) {
+            if (isModalOpen) {
+                rootLayout.setBackgroundColor(Color.parseColor("#161513"));
+            } else {
+                int themeColor = isCurrentDark ? Color.parseColor("#252523") : Color.parseColor("#FBFAF8");
+                rootLayout.setBackgroundColor(themeColor);
+            }
+        }
+    }
+
     public void updateSystemBarsAndTheme(boolean isDark) {
         try {
             this.isCurrentDark = isDark;
             int themeColor = isDark ? Color.parseColor("#252523") : Color.parseColor("#FBFAF8");
 
             if (rootLayout != null) {
-                rootLayout.setBackgroundColor(themeColor);
+                if (!isModalActive) {
+                    rootLayout.setBackgroundColor(themeColor);
+                }
             }
 
             Window window = getWindow();
@@ -631,7 +661,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
             ptrPullStartY = ptrDownY;
             ptrIsPulling = false;
             ptrCurrentPullPx = 0f;
-            ptrIgnoreGesture = ptrIsRefreshing || webView.canScrollVertically(-1);
+            ptrIgnoreGesture = ptrIsRefreshing || isModalActive || webView.canScrollVertically(-1);
             if (!ptrIgnoreGesture) {
                 webViewCanPull = true;
             }
@@ -818,6 +848,23 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         }
     }
 
+    public static class ModalStateRunnable implements Runnable {
+        private final MainActivity activity;
+        private final boolean isModalOpen;
+
+        public ModalStateRunnable(MainActivity activity, boolean isModalOpen) {
+            this.activity = activity;
+            this.isModalOpen = isModalOpen;
+        }
+
+        @Override
+        public void run() {
+            if (activity != null) {
+                activity.updateFullscreenModalState(isModalOpen);
+            }
+        }
+    }
+
     public static class ThemeChangeRunnable implements Runnable {
         private final MainActivity activity;
         private final boolean isDark;
@@ -847,7 +894,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         @Override
         public void run() {
             if (activity != null) {
-                if (activity.rootLayout != null) {
+                if (activity.rootLayout != null && !activity.isModalActive) {
                     activity.rootLayout.setBackgroundColor(color);
                 }
                 if (activity.webView != null) {
@@ -865,6 +912,13 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
 
         public AndroidBridge(MainActivity activity) {
             this.activity = activity;
+        }
+
+        @JavascriptInterface
+        public void setFullscreenModal(boolean isModalOpen) {
+            if (activity != null) {
+                activity.runOnUiThread(new ModalStateRunnable(activity, isModalOpen));
+            }
         }
 
         @JavascriptInterface
@@ -1037,6 +1091,14 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
 
     @Override
     public void onBackInvoked() {
+        if (isModalActive) {
+            if (webView != null) {
+                webView.evaluateJavascript(
+                    "if(typeof closeSwitcher==='function'){closeSwitcher();}" +
+                    "var f=document.querySelector('[data-amp-login-form]');if(f)f.remove();", null);
+            }
+            return;
+        }
         if (webView != null && webView.canGoBack()) {
             webView.goBack();
         } else {
@@ -1185,6 +1247,53 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                         "(document.head||document.documentElement).appendChild(st);" +
                         "}})();";
                 view.evaluateJavascript(cssFix, null);
+
+                // 3.5 Watch for fullscreen modals (Account Switcher, Login Form, Memo, etc.) to expand WebView to true 100% full screen
+                String modalObserver = "javascript:(function(){" +
+                        "if(window.__arena_modal_watcher_installed__)return;" +
+                        "window.__arena_modal_watcher_installed__=true;" +
+                        "var wasModal=false;" +
+                        "function checkModal(){" +
+                        "  var has=!!document.querySelector('[data-amp-switcher],[data-amp-login-form]');" +
+                        "  if(has!==wasModal){" +
+                        "    wasModal=has;" +
+                        "    try{if(window.AndroidBridge&&window.AndroidBridge.setFullscreenModal){window.AndroidBridge.setFullscreenModal(has);}}catch(e){}" +
+                        "  }" +
+                        "}" +
+                        "try{" +
+                        "  var obs=new MutationObserver(checkModal);" +
+                        "  obs.observe(document.documentElement||document,{childList:true,subtree:true});" +
+                        "}catch(e){}" +
+                        "checkModal();" +
+                        "})();";
+                view.evaluateJavascript(modalObserver, null);
+
+                // 3.6 Inject mobile CSS layout overrides for switcher & login modals
+                String switcherFixCss = "javascript:(function(){" +
+                        "if(!document.getElementById('__arena_switcher_mobile_fix__')){" +
+                        "var st=document.createElement('style');" +
+                        "st.id='__arena_switcher_mobile_fix__';" +
+                        "st.textContent='" +
+                        "[data-amp-switcher] .sw-warn{display:none !important;}" +
+                        "[data-amp-switcher].vert .sw-tl{left:12px !important;top:14px !important;display:flex !important;flex-wrap:nowrap !important;gap:6px !important;max-width:calc(100vw - 64px) !important;z-index:5 !important;}" +
+                        "[data-amp-switcher].vert .sw-tl .sw-hkb{display:none !important;}" +
+                        "[data-amp-switcher].vert .sw-tl .sw-memob{padding:6px 11px !important;font-size:12px !important;border-radius:999px !important;background:rgba(255,255,255,.12) !important;backdrop-filter:blur(4px) !important;white-space:nowrap !important;}" +
+                        "[data-amp-switcher].vert .sw-close{right:12px !important;top:14px !important;width:34px !important;height:34px !important;line-height:34px !important;font-size:18px !important;z-index:5 !important;}" +
+                        "[data-amp-switcher].vert .sw-top{top:58px !important;left:0 !important;right:0 !important;text-align:center !important;pointer-events:none !important;z-index:2 !important;}" +
+                        "[data-amp-switcher].vert .sw-title{font-size:17px !important;font-weight:600 !important;letter-spacing:.3px !important;}" +
+                        "[data-amp-switcher].vert .sw-sub{display:block !important;font-size:11.5px !important;color:rgba(243,241,236,.55) !important;margin-top:2px !important;}" +
+                        "[data-amp-switcher].vert .sw-stage{top:43% !important;}" +
+                        "[data-amp-switcher].vert .sw-mside{top:43% !important;right:calc(50% + 72px) !important;width:calc(50% - 84px) !important;max-width:140px !important;text-align:right !important;}" +
+                        "[data-amp-switcher].vert .sw-mside .sw-q0{font-size:11.5px !important;font-weight:600 !important;}" +
+                        "[data-amp-switcher].vert .sw-mside .sw-q1{font-size:17px !important;font-weight:700 !important;line-height:1.15 !important;white-space:nowrap !important;}" +
+                        "[data-amp-switcher].vert .sw-addb{right:12px !important;top:43% !important;font-size:10.5px !important;}" +
+                        "[data-amp-switcher].vert .sw-mcard{bottom:calc(max(14px, env(safe-area-inset-bottom, 14px)) + 36px) !important;width:min(320px, calc(100vw - 32px)) !important;padding:10px 14px !important;border-radius:14px !important;}" +
+                        "[data-amp-switcher].vert .sw-hint{left:0 !important;right:0 !important;bottom:max(12px, env(safe-area-inset-bottom, 12px)) !important;text-align:center !important;font-size:11.5px !important;color:rgba(243,241,236,.45) !important;}" +
+                        "[data-amp-login-form] .lf-card{max-width:min(380px, calc(100vw - 32px)) !important;box-sizing:border-box !important;}" +
+                        "';" +
+                        "(document.head||document.documentElement).appendChild(st);" +
+                        "}})();";
+                view.evaluateJavascript(switcherFixCss, null);
 
                 // 4. Inject native Tampermonkey GM_* polyfill bridge for Arena-Account-Switch
                 String gmPolyfill = "javascript:(function(){" +
