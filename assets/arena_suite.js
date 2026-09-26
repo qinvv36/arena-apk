@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         油猴脚本-额度大的用额度小的没必要用-Arena Native Suite
 // @namespace    local.amp.native
-// @version      1.11.85
+// @version      1.11.86
 // @description  【测试版】Arena 原生
 // @match        https://arena.ai/*
 // @run-at       document-start
@@ -15,7 +15,7 @@
 'use strict';
 // Only one copy may run; installing this next to the original Lite script would double-hook fetch.
 if (window.__AMP_NATIVE_SUITE__) return;
-try { Object.defineProperty(window, '__AMP_NATIVE_SUITE__', { value: '1.11.85' }); } catch {}
+try { Object.defineProperty(window, '__AMP_NATIVE_SUITE__', { value: '1.11.86' }); } catch {}
 // Claude 内部型号几乎都带 -vertex（渠道标记），默认不写进对话名/显示名
 // v1.11.78 “-public”也是部署标记（grok-4.7-xhigh-public）：和 -vertex 一样不显示，档位才能识别出来（xhigh）
 const noVertex = n => typeof n === 'string' ? n.replace(/-vertex(?=$|[-_\s·])/ig, '').replace(/-public(?=$|[\s·])/ig, '') : n;
@@ -8217,7 +8217,11 @@ details.mc-card .section.credits{margin-top:12px}
     const WSR=':is(html[data-amp-wsr] [role=dialog]:is([title="Workspace"],[title="工作区"]),[data-vaul-drawer][data-amp-wsright],[role=dialog][data-amp-wsright])';
     const gemOn=()=>!!prefs.gemLayout&&innerWidth<768&&/^\/agent(?:\/|$)/.test(location.pathname);
     const gemStyle=el('style','','@media (max-width:767px){'
-      +'html[data-amp-gem] main div.grid:has(> div > button[aria-label="Open sidebar"]){display:flex!important;align-items:center;gap:4px}html[data-amp-gem] main div.grid:has(> div > button[aria-label="Open sidebar"]) > div:first-child{flex:none}html[data-amp-gem] main div.grid:has(> div > button[aria-label="Open sidebar"]) > div:nth-child(2){flex:1 1 auto;min-width:0;justify-content:flex-start!important}html[data-amp-gem] main div.grid:has(> div > button[aria-label="Open sidebar"]) > div:last-child{flex:none;gap:6px}html[data-amp-gem] main div.grid:has(> div > button[aria-label="Open sidebar"]) > div:last-child > *{order:1}'
+      +'html[data-amp-gem] main div.grid:has(> div > button[aria-label="Open sidebar"]){display:flex!important;align-items:center;gap:4px;padding-top:max(30px,calc(env(safe-area-inset-top,0px) + 22px))!important;box-sizing:border-box!important}html[data-amp-gem] main div.grid:has(> div > button[aria-label="Open sidebar"]) > div:first-child{flex:none}html[data-amp-gem] main div.grid:has(> div > button[aria-label="Open sidebar"]) > div:nth-child(2){flex:1 1 auto;min-width:0;justify-content:flex-start!important}html[data-amp-gem] main div.grid:has(> div > button[aria-label="Open sidebar"]) > div:last-child{flex:none;gap:6px}html[data-amp-gem] main div.grid:has(> div > button[aria-label="Open sidebar"]) > div:last-child > *{order:1}'
+      +'main header,header:has(button[aria-label="Open sidebar"]){padding-top:max(30px,calc(env(safe-area-inset-top,0px) + 22px))!important;box-sizing:border-box!important}'
+      +'[data-sidebar="header"],aside header,nav header,[data-sidebar="sidebar"] > div:first-child{padding-top:max(26px,calc(env(safe-area-inset-top,0px) + 18px))!important;box-sizing:border-box!important}'
+      +'[data-radix-popper-content-wrapper]{max-width:calc(100vw - 20px)!important;box-sizing:border-box!important}'
+      +'[data-radix-popper-content-wrapper] > [role="menu"]{min-width:130px;max-width:calc(100vw - 24px)!important;box-sizing:border-box!important}'
       +'html[data-amp-gem] #amp-lite-panel[data-entry]{order:2!important}html[data-amp-gem] #amp-avatar{order:3!important}'
       +'html[data-amp-gem] main button[aria-label="Open sidebar"]{position:relative}html[data-amp-gem] main button[aria-label="Open sidebar"] > svg{opacity:0}'
       +'html[data-amp-gem] main button[aria-label="Open sidebar"]::after{content:"";position:absolute;left:50%;top:50%;width:24px;height:24px;margin:-12px 0 0 -12px;background:currentColor;-webkit-mask:url(data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20d=%22M4%208.5h16M4%2015.5h16%22%20stroke=%22black%22%20stroke-width=%222%22%20stroke-linecap=%22round%22/%3E%3C/svg%3E) center/contain no-repeat;mask:url(data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%3E%3Cpath%20d=%22M4%208.5h16M4%2015.5h16%22%20stroke=%22black%22%20stroke-width=%222%22%20stroke-linecap=%22round%22/%3E%3C/svg%3E) center/contain no-repeat;pointer-events:none}'
@@ -8717,8 +8721,20 @@ details.mc-card .section.credits{margin-top:12px}
     const NOTE_TXT='input:not([type]),input[type="text"],textarea,[contenteditable="true"]';
     function noteKill(n){if(!n?.querySelectorAll)return;const list=n.matches?.(NOTE_TXT)?[n]:[...n.querySelectorAll(NOTE_TXT)];for(const inp of list){if(inp.__ampNoteKilled||inp.closest('[data-amp-note-ed]'))continue;const c=noteCard(inp);if(!c)continue;inp.__ampNoteKilled=1;log('debug','备注命名','Arena 的重命名输入框出现了，已换成备注');
       setTimeout(()=>{if(inp.isConnected&&!inp.closest('[role="dialog"]')){try{inp.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',code:'Escape',keyCode:27,which:27,bubbles:true,cancelable:true}));}catch{}}setTimeout(()=>{try{if(inp.isConnected)inp.blur();}catch{}setTimeout(()=>noteEdit(c.sid),60);},60);},0);}}
-    const noteMo=new MutationObserver(ms=>{if(stopped||!prefs.noteTitle)return;for(const m of ms){if(!m.addedNodes.length)continue;const tg=m.target,side=!!tg.closest?.('aside,nav,[data-sidebar]');if(!(side||tg===document.body||tg.parentElement===document.body||tg.closest?.('[role="menu"],[data-radix-popper-content-wrapper],[role="tooltip"]')))continue;for(const n of m.addedNodes)if(n.nodeType===1){noteRelabel(n);if(side)noteKill(n);}}});
+    function clampPoppers(){
+      for(const w of document.querySelectorAll('[data-radix-popper-content-wrapper],[role="menu"]')){
+        const r=w.getBoundingClientRect();
+        if(r.width>0&&r.left<14){
+          const needed=14-r.left;
+          const cur=parseFloat(w.style.marginLeft||'0')||0;
+          w.style.setProperty('margin-left',(cur+needed)+'px','important');
+        }
+      }
+    }
+    const noteMo=new MutationObserver(ms=>{clampPoppers();if(stopped||!prefs.noteTitle)return;for(const m of ms){if(!m.addedNodes.length)continue;const tg=m.target,side=!!tg.closest?.('aside,nav,[data-sidebar]');if(!(side||tg===document.body||tg.parentElement===document.body||tg.closest?.('[role="menu"],[data-radix-popper-content-wrapper],[role="tooltip"]')))continue;for(const n of m.addedNodes)if(n.nodeType===1){noteRelabel(n);if(side)noteKill(n);}}});
     try{noteMo.observe(document.body,{childList:true,subtree:true});}catch{}
+    window.addEventListener('click',()=>requestAnimationFrame(clampPoppers),true);
+    window.addEventListener('pointerup',()=>requestAnimationFrame(clampPoppers),true);
     // 原地编辑：盖在卡片上的一行输入框（跟着卡片走，侧栏滚动 / 窗口变化时重新对齐）；回车 / 点别处保存，Esc 取消，清空 = 删除备注
     const NOTE_CSS='[data-amp-note-ed]{position:fixed;z-index:2147483600;display:flex;align-items:center;gap:6px;box-sizing:border-box;margin:0;padding:0 8px;border-radius:8px;background:hsl(var(--surface-primary,36 45% 98%));color:hsl(var(--text-primary,24 6% 17%));box-shadow:0 0 0 1.5px hsl(var(--text-secondary,35 6% 45%) / .6),0 6px 18px rgb(0 0 0 / .18);pointer-events:auto!important;font:500 13px/1.2 var(--font-basel-grotesk,var(--font-inter,system-ui)),"PingFang SC","Microsoft YaHei",sans-serif}'
       +'[data-amp-note-ed]>b{flex:none;font-size:10.5px;font-weight:600;line-height:16px;padding:0 6px;border-radius:999px;background:hsl(var(--text-primary,24 6% 17%) / .08);color:hsl(var(--text-secondary,35 6% 45%))}'

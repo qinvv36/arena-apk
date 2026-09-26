@@ -139,7 +139,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         try {
             SharedPreferences sp = getSharedPreferences("app_meta", MODE_PRIVATE);
             int lastVer = sp.getInt("last_apk_version", 0);
-            if (lastVer < 30) {
+            if (lastVer < 31) {
                 File brokenSuite = new File(getFilesDir(), "arena_suite_latest.js");
                 if (brokenSuite.exists()) brokenSuite.delete();
                 File brokenTmp = new File(getFilesDir(), "arena_suite_latest.tmp");
@@ -148,7 +148,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                 if (brokenSwitch.exists()) brokenSwitch.delete();
                 File brokenSwitchTmp = new File(getFilesDir(), "arena_account_switch_latest.tmp");
                 if (brokenSwitchTmp.exists()) brokenSwitchTmp.delete();
-                sp.edit().putInt("last_apk_version", 30).apply();
+                sp.edit().putInt("last_apk_version", 31).apply();
             }
         } catch (Throwable ignored) {}
 
@@ -173,15 +173,15 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         // Listen for WindowInsets so bottom navigation bar and keyboard automatically lift the view
         rootLayout.setOnApplyWindowInsetsListener(this);
 
-        // Native 15.5dp top offset on WebView from frame 0 (clears punch-hole camera above 'opus-5.5' without any post-load jump)
-        topCutoutOffsetPx = Math.round(15.5f * density);
+        // True edge-to-edge layout: WebView spans from y=0 to physical top edge, web UI handles safe padding
+        topCutoutOffsetPx = 0;
 
         // WebView
         webView = new WebView(this);
         FrameLayout.LayoutParams wvParams = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT);
-        wvParams.topMargin = topCutoutOffsetPx;
+        wvParams.topMargin = 0;
         webView.setLayoutParams(wvParams);
         webView.setFocusable(true);
         webView.setFocusableInTouchMode(true);
@@ -190,18 +190,11 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         webView.setOnTouchListener(this);
         rootLayout.addView(webView);
 
-        // Top divider hairline: subtle 1px border separating top cutout bar from web content
+        // Top divider hairline: hidden in edge-to-edge mode for seamless background
         topDividerView = new View(this);
-        int dividerHeightPx = Math.max(1, Math.round(0.8f * density));
-        FrameLayout.LayoutParams dividerParams = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dividerHeightPx);
-        dividerParams.gravity = Gravity.TOP;
-        dividerParams.topMargin = topCutoutOffsetPx - dividerHeightPx;
-        topDividerView.setLayoutParams(dividerParams);
+        topDividerView.setVisibility(View.GONE);
         topDividerView.setFocusable(false);
         topDividerView.setClickable(false);
-        int initialDividerColor = isNight ? Color.parseColor("#1AFFFFFF") : Color.parseColor("#14000000");
-        topDividerView.setBackgroundColor(initialDividerColor);
         rootLayout.addView(topDividerView);
 
         // Native Pull-To-Refresh Header (sinks together with WebView from top edge)
@@ -551,16 +544,13 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         this.isModalActive = isModalOpen;
         if (webView != null) {
             FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) webView.getLayoutParams();
-            if (lp != null) {
-                int targetMargin = isModalOpen ? 0 : topCutoutOffsetPx;
-                if (lp.topMargin != targetMargin) {
-                    lp.topMargin = targetMargin;
-                    webView.setLayoutParams(lp);
-                }
+            if (lp != null && lp.topMargin != 0) {
+                lp.topMargin = 0;
+                webView.setLayoutParams(lp);
             }
         }
         if (topDividerView != null) {
-            topDividerView.setVisibility(isModalOpen ? View.GONE : View.VISIBLE);
+            topDividerView.setVisibility(View.GONE);
         }
         if (rootLayout != null) {
             if (isModalOpen) {

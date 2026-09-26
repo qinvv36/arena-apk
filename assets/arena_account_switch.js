@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arena 账号切换（Arena Native Suite 配套）
 // @namespace    local.amp.native.accounts
-// @version      1.0.27
+// @version      1.0.28
 // @description  【测试版】在 Arena 个人卡片里一键切换已保存的账号；显示各账号最近记录的额度；一键导出/导入账号合集
 // @match        https://arena.ai/*
 // @include      https://arena.ai/*
@@ -22,7 +22,7 @@
   'use strict';
   if (window.__arena_account_switch_installed__) return;
   window.__arena_account_switch_installed__ = true;
-  const VERSION = '1.0.27';
+  const VERSION = '1.0.28';
   try { document.documentElement.dataset.ampSwitchVer = VERSION; } catch {}
   let closeSwitcher = () => {};
   const notifyModalState = (open) => {
@@ -1154,9 +1154,9 @@
   // ---------------- 切换器：全屏轮播 ----------------
   const SW_CSS = `
 [data-amp-switcher]{position:fixed;inset:0;z-index:2147483646;pointer-events:auto;font:13px/1.4 system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;color:#f3f1ec;
-  background:rgba(22,21,19,.66);-webkit-backdrop-filter:blur(8px) saturate(1.1);backdrop-filter:blur(8px) saturate(1.1);opacity:0;transition:opacity .28s ease;user-select:none;outline:none}
+  background:rgba(22,21,19,.75);-webkit-backdrop-filter:blur(10px) saturate(1.1);backdrop-filter:blur(10px) saturate(1.1);opacity:0;transition:opacity .28s ease;user-select:none;outline:none}
 [data-amp-switcher].on{opacity:1}
-[data-amp-switcher] .sw-top{position:absolute;left:0;right:0;top:12vh;text-align:center;transform:translateY(-8px);opacity:0;transition:all .45s cubic-bezier(.22,1,.36,1) .05s}
+[data-amp-switcher] .sw-top{position:absolute;left:0;right:0;top:max(88px, calc(env(safe-area-inset-top, 0px) + 74px));text-align:center;transform:translateY(-8px);opacity:0;transition:all .45s cubic-bezier(.22,1,.36,1) .05s}
 [data-amp-switcher].on .sw-top{transform:none;opacity:1}
 [data-amp-switcher] .sw-title{font-size:20px;font-weight:600;letter-spacing:.5px}
 [data-amp-switcher] .sw-sub{margin-top:4px;font-size:12px;color:rgba(243,241,236,.55)}
@@ -1199,9 +1199,9 @@
 [data-amp-switcher] .sw-q3.live::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:#8fd18f;margin-right:5px;vertical-align:1px;animation:swp 1.6s ease-in-out infinite}
 @keyframes swp{50%{opacity:.35}}
 [data-amp-switcher] .sw-bad{font-size:11px;color:#f2a39b;margin-top:2px}
-[data-amp-switcher] .sw-memob{position:absolute;left:18px;top:18px;border:0;border-radius:999px;padding:8px 14px;background:rgba(255,255,255,.1);color:rgba(243,241,236,.85);font:inherit;font-size:12.5px;cursor:pointer;z-index:3}
+[data-amp-switcher] .sw-memob{position:absolute;left:18px;top:max(42px, calc(env(safe-area-inset-top, 0px) + 32px));border:0;border-radius:999px;padding:8px 14px;background:rgba(255,255,255,.1);color:rgba(243,241,236,.85);font:inherit;font-size:12.5px;cursor:pointer;z-index:3}
 [data-amp-switcher] .sw-memob:hover{background:rgba(255,255,255,.2);color:#fff}
-[data-amp-switcher].vert .sw-memob{left:12px;top:12px}
+[data-amp-switcher].vert .sw-memob{left:12px;top:max(48px, calc(env(safe-area-inset-top, 0px) + 38px))}
 [data-amp-switcher] .sw-memo{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:2px 4px;margin-top:6px;font-size:11px}
 [data-amp-switcher] .sw-pwt{color:rgba(243,241,236,.8);font-family:ui-monospace,Consolas,monospace;letter-spacing:.5px;margin-right:4px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:text}
 [data-amp-switcher] .sw-pwt.none{color:rgba(243,241,236,.4);font-family:inherit;letter-spacing:0}
@@ -1214,7 +1214,7 @@
 [data-amp-switcher] .sw-arrow:hover{background:rgba(255,255,255,.18);transform:scale(1.08)}
 [data-amp-switcher] .sw-arrow:active{transform:scale(.94)}
 [data-amp-switcher] .sw-arrow.l{left:max(24px,calc(50% - 520px))}[data-amp-switcher] .sw-arrow.r{right:max(24px,calc(50% - 520px))}
-[data-amp-switcher] .sw-close{position:absolute;right:22px;top:18px;width:36px;height:36px;border-radius:50%;border:0;cursor:pointer;color:#f3f1ec;background:rgba(255,255,255,.08);font-size:18px;line-height:36px;padding:0}
+[data-amp-switcher] .sw-close{position:absolute;right:22px;top:max(42px, calc(env(safe-area-inset-top, 0px) + 32px));width:36px;height:36px;border-radius:50%;border:0;cursor:pointer;color:#f3f1ec;background:rgba(255,255,255,.08);font-size:18px;line-height:36px;padding:0}
 [data-amp-switcher] .sw-close:hover{background:rgba(255,255,255,.16)}
 [data-amp-switcher] .sw-hint{position:absolute;left:0;right:0;bottom:9vh;text-align:center;font-size:12px;color:rgba(243,241,236,.5)}
 [data-amp-switcher] .sw-hint kbd{display:inline-block;min-width:18px;padding:1px 6px;margin:0 2px;border-radius:5px;font:11px/16px inherit;color:#f3f1ec;background:rgba(255,255,255,.1);box-shadow:inset 0 -1px 0 rgba(0,0,0,.3)}
@@ -1231,7 +1231,7 @@
 [data-amp-switcher] .sw-addb.solo{top:47%;margin-top:-44px}[data-amp-switcher] .sw-addb.solo .sw-addc{width:112px;height:112px}
 [data-amp-switcher] .sw-hint{left:auto!important;right:22px;bottom:18px!important;text-align:right}
 [data-amp-switcher] .sw-warn{bottom:auto;top:138px}
-[data-amp-switcher].vert .sw-top{top:58px;left:0;right:0;text-align:center;pointer-events:none;z-index:2}
+[data-amp-switcher].vert .sw-top{top:max(98px, calc(env(safe-area-inset-top, 0px) + 88px));left:0;right:0;text-align:center;pointer-events:none;z-index:2}
 [data-amp-switcher].vert .sw-title{font-size:17px;font-weight:600;letter-spacing:.3px}
 [data-amp-switcher].vert .sw-sub{display:block !important;font-size:11.5px;color:rgba(243,241,236,.55);margin-top:2px}
 [data-amp-switcher].vert .sw-stage{top:43%}
@@ -1253,6 +1253,7 @@
 [data-amp-switcher].vert .sw-mside .sw-q2{font-size:11px}
 [data-amp-switcher].vert .sw-mside .sw-q3{font-size:10px;margin-top:2px}
 [data-amp-switcher].vert .sw-arrow{display:none!important}
+[data-amp-switcher].vert .sw-close{right:12px;top:max(48px, calc(env(safe-area-inset-top, 0px) + 38px));width:34px;height:34px;line-height:34px;font-size:18px;z-index:5}
 [data-amp-switcher].vert .sw-hint{left:0 !important;right:0 !important;bottom:max(12px, env(safe-area-inset-bottom, 12px)) !important;text-align:center;font-size:11.5px;color:rgba(243,241,236,.45)}
 [data-amp-switcher].vert .sw-addb{left:auto;right:12px;top:43%;transform:translateY(-50%);font-size:10.5px;gap:4px;margin:0}
 [data-amp-switcher].vert .sw-addc{width:46px;height:46px}[data-amp-switcher].vert .sw-addc svg{width:22px;height:22px}
