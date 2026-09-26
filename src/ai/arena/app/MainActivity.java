@@ -139,7 +139,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         try {
             SharedPreferences sp = getSharedPreferences("app_meta", MODE_PRIVATE);
             int lastVer = sp.getInt("last_apk_version", 0);
-            if (lastVer < 29) {
+            if (lastVer < 30) {
                 File brokenSuite = new File(getFilesDir(), "arena_suite_latest.js");
                 if (brokenSuite.exists()) brokenSuite.delete();
                 File brokenTmp = new File(getFilesDir(), "arena_suite_latest.tmp");
@@ -148,7 +148,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                 if (brokenSwitch.exists()) brokenSwitch.delete();
                 File brokenSwitchTmp = new File(getFilesDir(), "arena_account_switch_latest.tmp");
                 if (brokenSwitchTmp.exists()) brokenSwitchTmp.delete();
-                sp.edit().putInt("last_apk_version", 29).apply();
+                sp.edit().putInt("last_apk_version", 30).apply();
             }
         } catch (Throwable ignored) {}
 

@@ -8289,7 +8289,23 @@ details.mc-card .section.credits{margin-top:12px}
       const tip=(who?'账号 '+who:me?.anon?'未登录':'账号')+(ratio!==null?' · 美金余额 '+(un.src==='pulse'?'≈':'')+'$'+un.balanceRemainingUsd.toFixed(2)+' / $'+un.allowanceUsd.toFixed(2)+'（'+Math.round(ratio*100)+'%）':'')+(sw?' · 点击切换账号':' · 点击打开侧栏');avBtn.title=tip;avBtn.setAttribute('aria-label',tip);
       avPic.replaceChildren();const initial=()=>{avPic.textContent=(who||'?').trim().charAt(0).toUpperCase();};
       if(me?.avatar){const img=document.createElement('img');img.alt='';img.referrerPolicy='no-referrer';img.decoding='async';img.onerror=()=>{img.remove();if(who)initial();else icon('user',avPic);};img.src=me.avatar;avPic.append(img);}else if(who)initial();else icon('user',avPic);}
-    function avatarTap(){if(typeof window.__ampOpenSwitch==='function'){try{window.__ampOpenSwitch();return;}catch(e){}}try{window.dispatchEvent(new CustomEvent('amp:switch-open'));}catch{}}
+    let lastAvTap=0;
+    function safeAvatarTap(e){
+      if(e){try{e.preventDefault();e.stopPropagation();}catch{}}
+      const now=Date.now();
+      if(now-lastAvTap<300)return;
+      lastAvTap=now;
+      avatarTap();
+    }
+    avBtn.onclick=safeAvatarTap;
+    avBtn.addEventListener('touchend',safeAvatarTap,{passive:false});
+    avatarHost.onclick=safeAvatarTap;
+    avatarHost.addEventListener('touchend',safeAvatarTap,{passive:false});
+    function avatarTap(){
+      if(typeof window.__ampOpenSwitch==='function'){try{window.__ampOpenSwitch();return;}catch(e){}}
+      if(typeof window.__amp_open_switch==='function'){try{window.__amp_open_switch();return;}catch(e){}}
+      try{window.dispatchEvent(new CustomEvent('amp:switch-open'));}catch{}
+    }
     // 抽屉顶部 logo 旁的模式切换：原按钮在输入框工具栏里（手机上藏起来不占位置）；点这里先关抽屉，再在左上角打开 Arena 自己的模式菜单
     const modeHost=document.createElement('div');modeHost.id='amp-mode';const modeRoot=modeHost.attachShadow({mode:'open'});
     el('style','',':host{display:inline-flex;flex:none;align-items:center;margin:0 4px 0 2px}.mode{display:inline-flex;align-items:center;gap:3px;height:30px;padding:0 5px 0 7px;border-radius:9px;border:1px solid hsl(var(--border-medium,30 9% 87%) / .8);background:hsl(var(--surface-primary,36 45% 98%) / .45);color:inherit;font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}.mode:active{background:hsl(var(--surface-primary,36 45% 98%) / .85)}.ico{display:inline-flex}.ico svg{width:16px;height:16px;display:block}.mode>svg{width:12px;height:12px;opacity:.6}'

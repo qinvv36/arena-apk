@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arena 账号切换（Arena Native Suite 配套）
 // @namespace    local.amp.native.accounts
-// @version      1.0.25
+// @version      1.0.27
 // @description  【测试版】在 Arena 个人卡片里一键切换已保存的账号；显示各账号最近记录的额度；一键导出/导入账号合集
 // @match        https://arena.ai/*
 // @include      https://arena.ai/*
@@ -22,7 +22,7 @@
   'use strict';
   if (window.__arena_account_switch_installed__) return;
   window.__arena_account_switch_installed__ = true;
-  const VERSION = '1.0.26';
+  const VERSION = '1.0.27';
   try { document.documentElement.dataset.ampSwitchVer = VERSION; } catch {}
   let closeSwitcher = () => {};
   const notifyModalState = (open) => {
@@ -32,10 +32,13 @@
       }
     } catch {}
   };
-  window.__ampOpenSwitch = () => {
+  const doOpenSwitch = () => {
     if (document.querySelector('[data-amp-switcher]')) closeSwitcher();
     else void openPanel(null);
   };
+  window.__ampOpenSwitch = doOpenSwitch;
+  try { window.__amp_open_switch = doOpenSwitch; } catch {}
+  try { if (typeof unsafeWindow !== 'undefined') { unsafeWindow.__ampOpenSwitch = unsafeWindow.__amp_open_switch = doOpenSwitch; } } catch {}
   const ORIGIN = 'https://' + location.host;
   const AUTH_RE = /^arena-auth-prod-v1(\.\d+)?$/;
   const STORE = 'accounts.v2', OLD_STORE = 'accounts.v1'; // v2：按邮箱去重；旧版本标签页只会写 v1，不再污染
@@ -1100,39 +1103,50 @@
 
   function injectButton(dlg) {
     if (dlg.querySelector('[data-amp-switch]')) return;
-    const pill = [...dlg.querySelectorAll('*')].find(e => e.childElementCount === 0 && EMAIL.test((e.textContent || '').trim()));
-    if (!pill) return;
-    // 邮箱胶囊所在行里的“···”按钮
-    let row = pill.parentElement, more = null;
+    let pill = [...dlg.querySelectorAll('*')].find(e => e.childElementCount === 0 && EMAIL.test((e.textContent || '').trim()));
+    if (!pill) {
+      pill = [...dlg.querySelectorAll('*')].find(e => /[\w.-]+@[\w.-]+\.\w+/.test((e.innerText || e.textContent || '').trim()));
+    }
+    const signOut = [...dlg.querySelectorAll('button')].find(x => /sign out|log out|退出登录|登出/i.test(x.innerText || x.textContent || ''));
+    if (!pill && !signOut) return;
+
+    let row = pill ? pill.parentElement : null, more = null;
     for (let i = 0; i < 4 && row && !more; i++, row = row.parentElement) more = [...row.querySelectorAll('button')].find(b => b !== pill && !b.contains(pill) && !/sign out|reset/i.test(b.innerText || '') && !/close|关闭/i.test(b.getAttribute('aria-label') || ''));
-    const pillBox = pill.closest('button,span,div') || pill, cs = getComputedStyle(pillBox);
-    const b = el('button', 'display:inline-flex;align-items:center;gap:5px;height:' + Math.max(26, pillBox.getBoundingClientRect().height || 30) + 'px;padding:0 12px;margin-left:8px;border:0;border-radius:999px;cursor:pointer;font:inherit;font-size:13px;white-space:nowrap;flex-shrink:0;'
-      + 'background:' + (cs.backgroundColor && cs.backgroundColor !== 'rgba(0, 0, 0, 0)' ? cs.backgroundColor : (dark() ? 'rgba(255,255,255,.08)' : '#e9e5de')) + ';color:inherit');
+    const pillBox = pill ? (pill.closest('button,span,div') || pill) : null;
+    const b = el('button', null, null);
     b.type = 'button'; b.dataset.ampSwitch = '1'; b.title = '切换到已保存的账号，或添加新账号' + (hotkeys.panel ? '（快捷键 ' + comboLabel(hotkeys.panel) + '）' : '');
-    b.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3l4 4-4 4"/><path d="M20 7H9"/><path d="M8 21l-4-4 4-4"/><path d="M4 17h11"/></svg><span>切换账号</span>';
+    b.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex:none"><path d="M16 3l4 4-4 4"/><path d="M20 7H9"/><path d="M8 21l-4-4 4-4"/><path d="M4 17h11"/></svg><span style="font-weight:600;letter-spacing:0.3px">切换账号</span>';
     b.onclick = e => { e.preventDefault(); e.stopPropagation(); void openPanel(dlg); };
-    // 做成与 “Reset Password” 同款的整行按钮（手机 / 放不下时用），不会把卡片撑宽
+
     const asRow = () => {
       const reset = [...dlg.querySelectorAll('button')].find(x => /reset password|重置密码/i.test(x.innerText || ''));
-      b.removeAttribute('style'); b.className = reset?.className || '';
-      b.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:8px;width:100%;box-sizing:border-box;max-width:100%;cursor:pointer;' + (reset ? '' : 'height:40px;border-radius:8px;border:1px solid ' + (dark() ? '#3f3d39' : '#e5e1da') + ';background:transparent;color:inherit;font:inherit;font-size:14px;margin-top:8px');
-      const label = b.querySelector('span'); if (label) label.style.display = '';
-      if (reset) reset.insertAdjacentElement('beforebegin', b);
-      else { const row = pillBox.parentElement; (row?.parentElement ? row : pillBox).insertAdjacentElement('afterend', b); }
+      b.removeAttribute('style');
+      const isD = dark();
+      b.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:8px;width:100%;box-sizing:border-box;max-width:100%;cursor:pointer;'
+        + 'height:40px;border-radius:8px;border:1px solid ' + (isD ? '#44423e' : '#d8d4cc') + ';'
+        + 'background:' + (isD ? '#2e2c28' : '#f0ece5') + ';color:' + (isD ? '#f3f1ec' : '#1f2430') + ';'
+        + 'font:inherit;font-size:14px;margin:8px 0 10px 0;-webkit-tap-highlight-color:transparent;';
       if (reset) {
-        // 直接照抄 Reset Password 的外观（Arena 改了类名也能对上）
-        const c = getComputedStyle(reset);
-        for (const k of ['height', 'borderTop', 'borderRight', 'borderBottom', 'borderLeft', 'borderRadius', 'backgroundColor', 'color', 'fontSize', 'fontWeight', 'fontFamily', 'lineHeight', 'paddingLeft', 'paddingRight']) b.style[k] = c[k];
-        b.style.marginBottom = '10px';
+        reset.insertAdjacentElement('beforebegin', b);
+      } else if (signOut) {
+        signOut.insertAdjacentElement('beforebegin', b);
+      } else if (pillBox) {
+        const pRow = pillBox.parentElement;
+        (pRow?.parentElement ? pRow : pillBox).insertAdjacentElement('afterend', b);
+      } else {
+        dlg.appendChild(b);
       }
     };
+
     const narrow = innerWidth < 640 || matchMedia('(pointer:coarse)').matches && innerWidth < 820;
-    const w0 = dlg.offsetWidth;
-    if (narrow) { asRow(); return; }
+    if (narrow || !more) { asRow(); return; }
+    const cs = pillBox ? getComputedStyle(pillBox) : {};
+    b.style.cssText = 'display:inline-flex;align-items:center;gap:5px;height:' + Math.max(26, pillBox ? (pillBox.getBoundingClientRect().height || 30) : 30) + 'px;padding:0 12px;margin-left:8px;border:0;border-radius:999px;cursor:pointer;font:inherit;font-size:13px;white-space:nowrap;flex-shrink:0;'
+      + 'background:' + (cs.backgroundColor && cs.backgroundColor !== 'rgba(0, 0, 0, 0)' ? cs.backgroundColor : (dark() ? 'rgba(255,255,255,.08)' : '#e9e5de')) + ';color:inherit';
     if (more && more.parentElement) more.insertAdjacentElement('afterend', b);
-    else pillBox.insertAdjacentElement('afterend', b);
-    // 桌面：放不下（超出屏幕、换行或把卡片撑宽）就改成整行按钮；等弹窗动画结束再量一次
-    const bad = () => { const dr = dlg.getBoundingClientRect(), br = b.getBoundingClientRect(); return br.right > Math.min(dr.right, innerWidth) - 6 || dr.right > innerWidth - 2 || br.top - pillBox.getBoundingClientRect().top > 12 || (w0 && dlg.offsetWidth > w0 + 2); };
+    else if (pillBox) pillBox.insertAdjacentElement('afterend', b);
+    else asRow();
+    const bad = () => { const dr = dlg.getBoundingClientRect(), br = b.getBoundingClientRect(); return br.right > Math.min(dr.right, innerWidth) - 6 || dr.right > innerWidth - 2 || (pillBox && br.top - pillBox.getBoundingClientRect().top > 12); };
     requestAnimationFrame(() => { if (bad()) asRow(); });
     setTimeout(() => { if (b.isConnected && b.style.width !== '100%' && bad()) asRow(); }, 400);
   }
@@ -1265,7 +1279,7 @@
     const x = [...dlg.querySelectorAll('button')].find(b => /close|关闭/i.test(b.getAttribute('aria-label') || '') || (!b.innerText.trim() && b.querySelector('svg') && !b.dataset.ampSwitch && b.getBoundingClientRect().top - dlg.getBoundingClientRect().top < 40));
     if (x) x.click(); else dlg.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
   }
-  function openPanel(host) {
+  async function openPanel(host) {
     notifyModalState(true);
     if (host) closeDialog(host);
     document.querySelector('[data-amp-switcher]')?.remove();
