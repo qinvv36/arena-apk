@@ -130,6 +130,19 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
             startService(new Intent(this, ThemeMonitorService.class));
         } catch (Throwable ignored) {}
 
+        // Ensure any broken cached script from previous APK versions is wiped on APK upgrade
+        try {
+            SharedPreferences sp = getSharedPreferences("app_meta", MODE_PRIVATE);
+            int lastVer = sp.getInt("last_apk_version", 0);
+            if (lastVer < 26) {
+                File brokenSuite = new File(getFilesDir(), "arena_suite_latest.js");
+                if (brokenSuite.exists()) brokenSuite.delete();
+                File brokenTmp = new File(getFilesDir(), "arena_suite_latest.tmp");
+                if (brokenTmp.exists()) brokenTmp.delete();
+                sp.edit().putInt("last_apk_version", 26).apply();
+            }
+        } catch (Throwable ignored) {}
+
         // Load userscripts (prioritizes hot-updated scripts in filesDir over APK assets)
         suiteScript = loadCurrentScript();
         accountSwitchScript = loadCurrentAccountSwitchScript();
@@ -1509,6 +1522,10 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
         if (!code.contains("Arena") && !code.contains("UserScript") && !code.contains("mergedArenaTools")) {
             return;
         }
+        String ver = extractVersion(code);
+        if ("1.11.65".equals(ver)) {
+            return;
+        }
         try {
             String patched = patchMobileSafeMargin(code);
             File targetFile = new File(getFilesDir(), "arena_suite_latest.js");
@@ -1606,7 +1623,7 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
     }
 
     public String loadCurrentScript() {
-        String assetScript = loadAssetScript("arena_suite.js");
+        String assetScript = patchMobileSafeMargin(loadAssetScript("arena_suite.js"));
         String assetVer = extractVersion(assetScript);
         File diskFile = new File(getFilesDir(), "arena_suite_latest.js");
         if (diskFile.exists() && diskFile.length() > 5000) {
@@ -1619,10 +1636,10 @@ public class MainActivity extends Activity implements OnBackInvokedCallback, Vie
                 }
                 String diskScript = sb.toString();
                 String diskVer = extractVersion(diskScript);
-                if (compareVersions(diskVer, assetVer) > 0) {
-                    return patchMobileSafeMargin(diskScript);
-                } else {
+                if ("1.11.65".equals(diskVer) || compareVersions(diskVer, assetVer) <= 0) {
                     diskFile.delete();
+                } else {
+                    return patchMobileSafeMargin(diskScript);
                 }
             } catch (Exception e) {
                 e.printStackTrace();
